@@ -1,0 +1,9 @@
+[submodule "external/kokkos"]
+	path = external/kokkos
+	url = git@github.com:kokkos/kokkos.git
+[submodule "external/inih"]
+	path = external/inih
+	url = git@github.com:jtilly/inih.git
+[submodule "external/highfive"]
+	path = external/highfive
+	url = git@github.com:highfive-devs/highfive.git
