@@ -2,7 +2,7 @@
 
 #include "SimInfo.h"
 
-namespace fv2d {
+namespace fv3d {
 
 namespace {
 
