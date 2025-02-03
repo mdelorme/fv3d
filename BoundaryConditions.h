@@ -132,6 +132,37 @@ namespace fv3d {
 
     return res;
   }
+
+
+  /**
+   * @brief Experimental stuff for tri-layer
+   */
+  KOKKOS_INLINE_FUNCTION
+  State fillTriLayerDamping(Array Q, int i, int j, int k, int iref, int jref, int kref, IDir dir, const Params &params) {
+    if (dir == IZ && k < 0) {
+      Pos pos = getPos(params, i, j, k);
+      const real_t T0 = params.iso3_T0;
+      const real_t rho0 = params.iso3_rho0 * exp(-params.iso3_dz0 * params.g / T0);
+      const real_t p0 = rho0*T0;
+      const real_t d = pos[IZ];
+
+      // Top layer (iso-thermal)
+      real_t rho, p;
+      p   = p0 * exp(params.g * d / T0);
+      rho = p / T0;
+
+      State q;
+
+      q = getStateFromArray(Q, i, j, kref);
+      q[IR] = rho;
+      // q[IU] = 0.0;
+      // q[IV] = 0.0;
+      q[IP] = p;
+      return q;
+    }
+    else
+      return fillAbsorbing(Q, iref, jref, kref);
+  }
 } // anonymous namespace
 
 
@@ -202,10 +233,11 @@ public:
 
                             auto fill = [&](int k, int kref) {
                               switch (bc_z) {
-                                case BC_ABSORBING:  return fillAbsorbing(Q, i, j, kref); break;
-                                case BC_REFLECTING: return fillReflecting(Q, i, j, k, i, j, kref, IZ, params); break;
-                                case BC_C91:        return fillC91(Q, i, j, k, kref, IZ, params); break;
-                                default:            return fillPeriodic(Q, i, j, k, IZ, params); break;
+                                case BC_ABSORBING:        return fillAbsorbing(Q, i, j, kref); break;
+                                case BC_REFLECTING:       return fillReflecting(Q, i, j, k, i, j, kref, IZ, params); break;
+                                case BC_C91:              return fillC91(Q, i, j, k, kref, IZ, params); break;
+                                case BC_TRILAYER_DAMPING: return fillTriLayerDamping(Q, i, j, k, i, j, kref, IZ, params); break;
+                                default:                  return fillPeriodic(Q, i, j, k, IZ, params); break;
                               }
                             };
 

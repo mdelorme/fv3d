@@ -38,7 +38,8 @@ enum BoundaryType {
   BC_ABSORBING,
   BC_REFLECTING,
   BC_PERIODIC,
-  BC_C91
+  BC_C91,
+  BC_TRILAYER_DAMPING
 };
 
 enum TimeStepping {
@@ -55,6 +56,10 @@ enum ReconstructionType {
 enum ThermalConductivityMode {
   TCM_CONSTANT,
   TCM_B02,
+  TCM_ISO3
+};
+enum HeatingMode {
+  HM_COOLING_ISO,
 };
 
 // Thermal conduction at boundary
@@ -135,6 +140,11 @@ struct Params {
   ViscosityMode viscosity_mode;
   real_t mu;
 
+  // Heating
+  bool heating_active;
+  HeatingMode heating_mode;
+  bool log_total_heating;
+
   // Polytropes and such
   real_t m1;
   real_t theta1;
@@ -152,6 +162,14 @@ struct Params {
   real_t b02_kappa1;
   real_t b02_kappa2;
   real_t b02_thickness;
+
+  // Isothermal-triple layer
+  real_t iso3_dz0, iso3_dz1, iso3_dz2;
+  real_t iso3_theta1, iso3_theta2;
+  real_t iso3_m1, iso3_m2;
+  real_t iso3_pert;
+  real_t iso3_k1, iso3_k2;
+  real_t iso3_T0, iso3_rho0;
 
   // Misc 
   int seed;
@@ -205,10 +223,11 @@ Params readInifile(std::string filename) {
   std::string tmp;
   tmp = reader.Get("run", "boundaries_x", "reflecting");
   std::map<std::string, BoundaryType> bc_map{
-    {"reflecting",         BC_REFLECTING},
-    {"absorbing",          BC_ABSORBING},
-    {"periodic",           BC_PERIODIC},
-    {"C91",                BC_C91}
+    {"reflecting",           BC_REFLECTING},
+    {"absorbing",            BC_ABSORBING},
+    {"periodic",             BC_PERIODIC},
+    {"C91",                  BC_C91},
+    {"triple_layer_damping", BC_TRILAYER_DAMPING}
   };
   res.boundary_x = bc_map[tmp];
   tmp = reader.Get("run", "boundaries_y", "reflecting");
@@ -256,8 +275,9 @@ Params readInifile(std::string filename) {
   res.thermal_conductivity_active = reader.GetBoolean("thermal_conduction", "active", false);
   tmp = reader.Get("thermal_conduction", "conductivity_mode", "constant");
   std::map<std::string, ThermalConductivityMode> thermal_conductivity_map{
-    {"constant", TCM_CONSTANT},
-    {"B02",      TCM_B02}
+    {"constant" , TCM_CONSTANT},
+    {"B02",       TCM_B02},
+    {"iso-three", TCM_ISO3}
   };
   res.thermal_conductivity_mode = thermal_conductivity_map[tmp];
   res.kappa = reader.GetFloat("thermal_conduction", "kappa", 0.0);
@@ -283,11 +303,34 @@ Params readInifile(std::string filename) {
   res.viscosity_mode = viscosity_map[tmp];
   res.mu = reader.GetFloat("viscosity", "mu", 0.0);
 
+  // Heating function 
+  res.heating_active = reader.GetBoolean("heating", "active", false);
+  tmp = reader.Get("heating", "mode", "C2020");
+  std::map<std::string, HeatingMode> heating_map{
+    {"isothermal_cooling", HM_COOLING_ISO}
+  };
+  res.heating_mode = heating_map[tmp];
+  res.log_total_heating = reader.GetBoolean("misc", "log_total_heating", false);
+
   // H84
   res.h84_pert = reader.GetFloat("H84", "perturbation", 1.0e-4);
 
   // C91
   res.c91_pert = reader.GetFloat("C91", "perturbation", 1.0e-3);
+
+  // Isothermal triple layer
+  res.iso3_dz0    = reader.GetFloat("isothermal_triple", "dz0", 1.0);
+  res.iso3_dz1    = reader.GetFloat("isothermal_triple", "dz1", 2.0);
+  res.iso3_dz2    = reader.GetFloat("isothermal_triple", "dz2", 2.0);
+  res.iso3_theta1 = reader.GetFloat("isothermal_triple", "theta1", 2.0);
+  res.iso3_theta2 = reader.GetFloat("isothermal_triple", "theta2", 2.0);
+  res.iso3_pert   = reader.GetFloat("isothermal_triple", "perturbation", 1.0e-3);
+  res.iso3_k1     = reader.GetFloat("isothermal_triple", "k1", 0.07);
+  res.iso3_k2     = reader.GetFloat("isothermal_triple", "k2", 1.5);
+  res.iso3_m1     = reader.GetFloat("isothermal_triple", "m1", 1.0);
+  res.iso3_m2     = reader.GetFloat("isothermal_triple", "m2", 1.0);
+  res.iso3_T0     = reader.GetFloat("isothermal_triple", "T0", 1.0);
+  res.iso3_rho0   = reader.GetFloat("isothermal_triple", "rho0", 1.0);
 
   // Misc
   res.seed = reader.GetInteger("misc", "seed", 12345);

@@ -14,6 +14,20 @@ real_t computeKappa(real_t x, real_t y, real_t z, const Params &params) {
       res = params.kappa * (params.b02_kappa1 * (1.0-tr) + params.b02_kappa2 * tr);
       break;
     }
+    case TCM_ISO3:
+    {
+      const real_t z1 = params.iso3_dz0;
+      const real_t z2 = z1 + params.iso3_dz1;
+      const real_t th = 0.05; // Thickness of transition layer
+      const real_t tr1 = (tanh((z-z1)/th) + 1.0) * 0.5;
+      const real_t tr2 = (tanh((z2-z)/th) + 1.0) * 0.5;
+      const real_t tr = tr1*tr2;
+      res = params.kappa * (params.iso3_k2 * (1.0-tr) + params.iso3_k1 * tr);
+      break;
+      // const real_t tr = (tanh((y-y2)/th) + 1.0) * 0.5;
+      // res = params.kappa * (params.iso3_k1 * (1.0-tr) + params.iso3_k2 * tr);
+      break;
+    }
     default:
       res = params.kappa;
   }
