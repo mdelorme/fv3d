@@ -7,7 +7,7 @@
 #include "IOManager.h"
 #include "Update.h"
 
-using namespace fv2d;
+using namespace fv3d;
 
 int main(int argc, char **argv) {
   // Initializing Kokkos

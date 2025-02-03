@@ -6,7 +6,7 @@
 #include "SimInfo.h"
 #include "BoundaryConditions.h"
 
-namespace fv2d {
+namespace fv3d {
 
 namespace {
 

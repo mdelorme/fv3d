@@ -5,7 +5,7 @@
 #include "INIReader.h"
 #include <Kokkos_Core.hpp>
 
-namespace fv2d {
+namespace fv3d {
 
 using real_t = double;
 constexpr int Nfields = 5;
@@ -309,7 +309,7 @@ Params readInifile(std::string filename) {
 // All states operations
 #include "States.h"
 
-namespace fv2d {
+namespace fv3d {
 void consToPrim(Array U, Array Q, const Params &params) {
   Kokkos::parallel_for( "Conservative to Primitive", 
                         params.range_tot,

@@ -2,7 +2,7 @@
 
 #include "SimInfo.h"
 
-namespace fv2d {
+namespace fv3d {
 
 KOKKOS_INLINE_FUNCTION
 real_t computeMu(int i, int j, int k, const Params &params) {

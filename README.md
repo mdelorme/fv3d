@@ -1,4 +1,4 @@
-# FV2D
+# fv3d
 2D finite volume code with Kokkos for experimentation/prototyping purposes
 
 ## Dependencies
@@ -9,7 +9,7 @@
 
 ## Building
 
-Building relies on CMake. As FV2D is built with Kokkos included as a submodule, all Kokkos option have to be passed here. For more information on how to indicate which architecture/compiler you wish to use with Kokkos, please refer to the [Kokkos documentation](https://kokkos.org/kokkos-core-wiki/ProgrammingGuide/Compiling.html). Here are a few examples of build commands for FV2D depending on the architecture : 
+Building relies on CMake. As fv3d is built with Kokkos included as a submodule, all Kokkos option have to be passed here. For more information on how to indicate which architecture/compiler you wish to use with Kokkos, please refer to the [Kokkos documentation](https://kokkos.org/kokkos-core-wiki/ProgrammingGuide/Compiling.html). Here are a few examples of build commands for fv3d depending on the architecture : 
 
 ### Configuring on CPU with Clang
 
@@ -44,14 +44,14 @@ Once the program has been successfully configured, you can build the code :
 make -j
 ```
 
-At the end of the compilation, an executable `fv2d` should be created in the build folder.
+At the end of the compilation, an executable `fv3d` should be created in the build folder.
 
 ## Usage
 
-To use `fv2d` simply run the `fv2d` executable and provide a `.ini` file on the command line. For instance, if you are in a build folder located right below the root of `fv2d`, you can run a test by typing : 
+To use `fv3d` simply run the `fv3d` executable and provide a `.ini` file on the command line. For instance, if you are in a build folder located right below the root of `fv3d`, you can run a test by typing : 
 
 ```bash
-./fv2d ../settings/blast.ini
+./fv3d ../settings/blast.ini
 ```
 
 The code will start outputting information : 
@@ -130,4 +130,4 @@ f.close()
 ![Rendering of the 2D sedov Blast](figs/blast_plot.png)
 
 
-More example of post-treatment scripts can be found in the `python` folder at the root of FV2D.
+More example of post-treatment scripts can be found in the `python` folder at the root of fv3d.

@@ -1,6 +1,6 @@
 #pragma once
 
-namespace fv2d {
+namespace fv3d {
 
 KOKKOS_INLINE_FUNCTION
 State getStateFromArray(Array arr, int i, int j, int k) {

@@ -1,6 +1,6 @@
 #pragma once
 
-namespace fv2d {
+namespace fv3d {
 
 KOKKOS_INLINE_FUNCTION
 void hll(State &qL, State &qR, State& flux, real_t &pout, const Params &params) {

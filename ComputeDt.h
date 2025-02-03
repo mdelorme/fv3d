@@ -4,7 +4,7 @@
 #include "ThermalConduction.h"
 #include "Viscosity.h"
 
-namespace fv2d {
+namespace fv3d {
 
 class ComputeDtFunctor {
 public:

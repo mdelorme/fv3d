@@ -10,7 +10,7 @@
 
 using namespace H5Easy;
 
-namespace fv2d {
+namespace fv3d {
 
   // xdmf strings
 namespace {

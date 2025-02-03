@@ -2,7 +2,7 @@
 
 #include "SimInfo.h"
 
-namespace fv2d {
+namespace fv3d {
 
 KOKKOS_INLINE_FUNCTION
 real_t computeKappa(real_t x, real_t y, real_t z, const Params &params) {
