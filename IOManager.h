@@ -108,6 +108,7 @@ void saveSolutionMultiple(const Array &Q, int iteration, real_t t, real_t dt) {
     file.createAttribute("Ntz", params.Ntz);
     file.createAttribute("Nx", params.Nx);
     file.createAttribute("Ny", params.Ny);
+    file.createAttribute("Nz", params.Nz);
     file.createAttribute("ibeg", params.ibeg);
     file.createAttribute("iend", params.iend);
     file.createAttribute("jbeg", params.jbeg);
@@ -201,6 +202,7 @@ void saveSolutionMultiple(const Array &Q, int iteration, real_t t, real_t dt) {
       file.createAttribute("kbeg", params.kbeg);
       file.createAttribute("kend", params.kend);
       file.createAttribute("problem", params.problem);
+      file.createAttribute("iteration", iteration);
 
       std::vector<real_t> x, y, z;
       // -- vertex pos
