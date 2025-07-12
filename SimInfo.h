@@ -8,6 +8,20 @@
 
 namespace fv3d {
 
+namespace {
+  auto read_map(INIReader &reader, const auto& map, const std::string& section, const std::string& name, const std::string& default_value){
+    std::string tmp;
+    tmp = reader.Get(section, name, default_value);
+
+    if (map.count(tmp) == 0) {
+      tmp = "\nallowed values: ";
+      for (auto elem : map) tmp += elem.first + ", ";
+      throw std::runtime_error(std::string("bad parameter for ") + name + ": " + tmp);
+    }
+    return map.at(tmp);
+  };
+}
+
 using real_t = double;
 using IFace = uint8_t;
 constexpr int Ngrids  = 6;
@@ -227,6 +241,7 @@ struct GridNeighbourIndex {
   int i, j;
 };
 
+KOKKOS_INLINE_FUNCTION
 GridNeighbourIndex getGridNeighbourIndex(IFace face, IDir dir, ISide side, int i, int j, const Params &params) {
   enum : uint8_t {im = 0, ip = 1, jm = 2, jp = 3, __ = 255};
 
@@ -234,9 +249,9 @@ GridNeighbourIndex getGridNeighbourIndex(IFace face, IDir dir, ISide side, int i
   const int beg = params.ibeg; // ibeg = jbeg
   const int end = params.iend; // iend = jend
   const int Ng  = params.Ng;
-  int main_dir = (dir == IX) ? i : j;
-  int orth_dir = (dir == IX) ? j : i;
-  int ghost_id = (side == ILEFT) ? beg - 1 - main_dir : main_dir - end;
+  const int main_dir = (dir == IX) ? i : j;
+  const int orth_dir = (dir == IX) ? j : i;
+  const int ghost_id = (side == ILEFT) ? beg - 1 - main_dir : main_dir - end;
 
   if (dir == IZ)
     throw std::runtime_error("Grids do not have neighbours on the Z direction.");
@@ -351,8 +366,6 @@ Params readInifile(std::string filename) {
   res.save_freq = reader.GetFloat("run", "save_freq", 1.0e-1);
   res.filename_out = reader.Get("run", "output_filename", "run");
 
-  std::string tmp;
-  tmp = reader.Get("run", "boundaries_x", "cubed_sphere");
   std::map<std::string, BoundaryType> bc_map{
     {"reflecting",           BC_REFLECTING},
     {"absorbing",            BC_ABSORBING},
@@ -361,33 +374,28 @@ Params readInifile(std::string filename) {
     {"triple_layer_damping", BC_TRILAYER_DAMPING},
     {"cubed_sphere",         BC_CUBED_SPHERE}
   };
-  res.boundary_x = bc_map[tmp];
-  tmp = reader.Get("run", "boundaries_y", "cubed_sphere");
-  res.boundary_y = bc_map[tmp];
-  tmp = reader.Get("run", "boundaries_z", "reflecting");
-  res.boundary_z = bc_map[tmp];
+  res.boundary_x = read_map(reader, bc_map, "run", "boundaries_x", "cubed_sphere");
+  res.boundary_y = read_map(reader, bc_map, "run", "boundaries_y", "cubed_sphere");
+  res.boundary_z = read_map(reader, bc_map, "run", "boundaries_z", "reflecting");
 
-  tmp = reader.Get("solvers", "reconstruction", "pcm");
   std::map<std::string, ReconstructionType> recons_map{
     {"pcm",    PCM},
     {"pcm_wb", PCM_WB},
     {"plm",    PLM}
   };
-  res.reconstruction = recons_map[tmp];
+  res.reconstruction = read_map(reader, recons_map, "solvers", "reconstruction", "pcm");
 
-  tmp = reader.Get("solvers", "riemann_solver", "hllc");
   std::map<std::string, RiemannSolver> riemann_map{
     {"hll", HLL},
     {"hllc", HLLC}
   };
-  res.riemann_solver = riemann_map[tmp];
+  res.riemann_solver = read_map(reader, riemann_map, "solvers", "riemann_solver", "hllc");
 
-  tmp = reader.Get("solvers", "time_stepping", "euler");
   std::map<std::string, TimeStepping> ts_map{
     {"euler", TS_EULER},
     {"RK2",   TS_RK2}
   };
-  res.time_stepping = ts_map[tmp];
+  res.time_stepping = read_map(reader, ts_map, "solvers", "time_stepping", "euler");
 
   res.CFL = reader.GetFloat("solvers", "CFL", 0.8);
 
@@ -405,13 +413,12 @@ Params readInifile(std::string filename) {
 
   // Thermal conductivity
   res.thermal_conductivity_active = reader.GetBoolean("thermal_conduction", "active", false);
-  tmp = reader.Get("thermal_conduction", "conductivity_mode", "constant");
   std::map<std::string, ThermalConductivityMode> thermal_conductivity_map{
     {"constant" , TCM_CONSTANT},
     {"B02",       TCM_B02},
     {"iso-three", TCM_ISO3}
   };
-  res.thermal_conductivity_mode = thermal_conductivity_map[tmp];
+  res.thermal_conductivity_mode = read_map(reader, thermal_conductivity_map, "thermal_conduction", "conductivity_mode", "constant");
   res.kappa = reader.GetFloat("thermal_conduction", "kappa", 0.0);
 
   std::map<std::string, BCTC_Mode> bctc_map{
@@ -419,29 +426,25 @@ Params readInifile(std::string filename) {
     {"fixed_temperature", BCTC_FIXED_TEMPERATURE},
     {"fixed_gradient",    BCTC_FIXED_GRADIENT}
   };
-  tmp = reader.Get("thermal_conduction", "bc_zmin", "none");
-  res.bctc_zmin = bctc_map[tmp];
-  tmp = reader.Get("thermal_conduction", "bc_zmax", "none");
-  res.bctc_zmax = bctc_map[tmp];
+  res.bctc_zmin = read_map(reader, bctc_map, "thermal_conduction", "bc_zmin", "none");
+  res.bctc_zmax = read_map(reader, bctc_map, "thermal_conduction", "bc_zmax", "none");
   res.bctc_zmin_value = reader.GetFloat("thermal_conduction", "bc_zmin_value", 1.0);
   res.bctc_zmax_value = reader.GetFloat("thermal_conduction", "bc_zmax_value", 1.0);
 
   // Viscosity
   res.viscosity_active = reader.GetBoolean("viscosity", "active", false);
-  tmp = reader.Get("viscosity", "viscosity_mode", "constant");
   std::map<std::string, ViscosityMode> viscosity_map{
     {"constant", VSC_CONSTANT},
   };
-  res.viscosity_mode = viscosity_map[tmp];
+  res.viscosity_mode = read_map(reader, viscosity_map, "viscosity", "viscosity_mode", "constant");
   res.mu = reader.GetFloat("viscosity", "mu", 0.0);
 
   // Heating function 
   res.heating_active = reader.GetBoolean("heating", "active", false);
-  tmp = reader.Get("heating", "mode", "C2020");
   std::map<std::string, HeatingMode> heating_map{
     {"isothermal_cooling", HM_COOLING_ISO}
   };
-  res.heating_mode = heating_map[tmp];
+  res.heating_mode = read_map(reader, heating_map, "heating", "mode", "C2020");
   res.log_total_heating = reader.GetBoolean("misc", "log_total_heating", false);
 
   // H84
