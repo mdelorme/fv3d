@@ -28,7 +28,7 @@ public:
     Kokkos::parallel_for(
       "Viscosity",
       params.range_dom,
-      KOKKOS_LAMBDA(const int i, const int j, const int k) {
+      KOKKOS_LAMBDA(const IFace face, const int i, const int j, const int k) {
         Pos pos = getPos(params, i, j, k);
         real_t x = pos[IX];
         real_t y = pos[IY];
@@ -44,7 +44,7 @@ public:
           for (int di=-1; di < 2; ++di)
             for (int dj=-1; dj < 2; ++dj)
               for (int dk=-1; dk < 2; ++dk)
-                stencil[dk+1][dj+1][di+1] = getStateFromArray(Q, i+di, j+dj, k+dk);
+                stencil[dk+1][dj+1][di+1] = getStateFromArray(Q, face, i+di, j+dj, k+dk);
         };
 
         auto computeViscousFlux = [&](IDir dir) {
@@ -147,9 +147,9 @@ public:
         State vf_y = computeViscousFlux(IY);
         State vf_z = computeViscousFlux(IZ);
 
-        State un_loc = getStateFromArray(Unew, i, j, k);
+        State un_loc = getStateFromArray(Unew, face, i, j, k);
         un_loc += dt * (vf_x + vf_y + vf_z);
-        setStateInArray(Unew, i, j, k, un_loc);
+        setStateInArray(Unew, face, i, j, k, un_loc);
 
       });
   }

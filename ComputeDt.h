@@ -27,9 +27,9 @@ public:
 
     Kokkos::parallel_reduce("Computing DT",
                             params.range_dom,
-                            KOKKOS_LAMBDA(int i, int j, int k, real_t &inv_dt_hyp, real_t &inv_dt_par_tc, real_t &inv_dt_par_visc) {
+                            KOKKOS_LAMBDA(IFace face, int i, int j, int k, real_t &inv_dt_hyp, real_t &inv_dt_par_tc, real_t &inv_dt_par_visc) {
                               // Hydro time-step
-                              State q = getStateFromArray(Q, i, j, k);
+                              State q = getStateFromArray(Q, face, i, j, k);
                               real_t cs = speedOfSound(q, params);
 
                               real_t inv_dt_hyp_loc = (cs + fabs(q[IU]))/params.dx + (cs + fabs(q[IV]))/params.dy + (cs + fabs(q[IW]))/params.dz;

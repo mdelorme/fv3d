@@ -4,15 +4,18 @@
 #include <functional>
 #include "INIReader.h"
 #include <Kokkos_Core.hpp>
+#include <math.h>
 
 namespace fv3d {
 
 using real_t = double;
+using IFace = uint8_t;
+constexpr int Ngrids  = 6;
 constexpr int Nfields = 5;
 using Pos   = Kokkos::Array<real_t, 3>;
 using State = Kokkos::Array<real_t, Nfields>;
-using Array = Kokkos::View<real_t****>;
-using ParallelRange = Kokkos::MDRangePolicy<Kokkos::Rank<3>>;
+using Array = Kokkos::View<real_t*****>;
+using ParallelRange = Kokkos::MDRangePolicy<Kokkos::Rank<4>>;
 
 struct RestartInfo {
   real_t time;
@@ -25,6 +28,11 @@ enum IDir : uint8_t {
   IZ = 2,
 };
 
+enum ISide : uint8_t {
+  ILEFT  = 0,
+  IRIGHT = 1,
+};
+
 enum IVar : uint8_t {
   IR = 0,
   IU = 1,
@@ -33,6 +41,24 @@ enum IVar : uint8_t {
   IP = 4,
   IE = 4
 };
+
+enum IFaceEnum : IFace {
+  IXM = 0,
+  IXP = 1,
+  IYM = 2,
+  IYP = 3,
+  IZM = 4,
+  IZP = 5
+};
+
+std::map<IFace, std::string> facename_map{
+    {IXM, "x-"},
+    {IXP, "x+"},
+    {IYM, "y-"},
+    {IYP, "y+"},
+    {IZM, "z-"},
+    {IZP, "z+"}
+  };
 
 enum RiemannSolver {
   HLL,
@@ -44,7 +70,8 @@ enum BoundaryType {
   BC_REFLECTING,
   BC_PERIODIC,
   BC_C91,
-  BC_TRILAYER_DAMPING
+  BC_TRILAYER_DAMPING,
+  BC_CUBED_SPHERE
 };
 
 enum TimeStepping {
@@ -185,6 +212,98 @@ struct Params {
 };
 
 // Helper to get the position in the mesh
+
+KOKKOS_INLINE_FUNCTION
+Pos operator*(const real_t a, const Pos &p) {
+  return {a*p[IX], a*p[IY], a*p[IZ]};
+}
+KOKKOS_INLINE_FUNCTION
+Pos operator/(const Pos &p, const real_t a) {
+  return {p[IX]/a, p[IY]/a, p[IZ]/a};
+}
+
+struct GridNeighbourIndex {
+  IFace neighbour_face;
+  int i, j;
+};
+
+GridNeighbourIndex getGridNeighbourIndex(IFace face, IDir dir, ISide side, int i, int j, const Params &params) {
+  enum : uint8_t {im = 0, ip = 1, jm = 2, jp = 3, __ = 255};
+
+  GridNeighbourIndex info;
+  const int beg = params.ibeg; // ibeg = jbeg
+  const int end = params.iend; // iend = jend
+  const int Ng  = params.Ng;
+  int main_dir = (dir == IX) ? i : j;
+  int orth_dir = (dir == IX) ? j : i;
+  int ghost_id = (side == ILEFT) ? beg - 1 - main_dir : main_dir - end;
+
+  if (dir == IZ)
+    throw std::runtime_error("Grids do not have neighbours on the Z direction.");
+
+  constexpr IFace neighbour_connectivity[][2][2] = {
+                 /* IX */    /* IY */
+    /* IXM */ { {IYP, IYM}, {IZM, IZP} },
+    /* IXP */ { {IYP, IYM}, {IZP, IZM} },
+    /* IYM */ { {IXP, IXM}, {IZP, IZM} },
+    /* IYP */ { {IXP, IXM}, {IZM, IZP} },
+    /* IZM */ { {IXP, IXM}, {IYM, IYP} },
+    /* IZP */ { {IXP, IXM}, {IYP, IYM} }
+  };
+  info.neighbour_face = neighbour_connectivity[face][dir][side];
+  
+  constexpr uint8_t boundary_neighbour_side[6][6] = {
+                    /* neighbour */
+    /* face *//*  IX      IY      IZ*/
+    /* IXM  */ {__, __, ip, ip, ip, ip},
+    /* IXP  */ {__, __, im, im, im, im},
+    /* IYM  */ {ip, ip, __, __, jm, jp},
+    /* IYP  */ {im, im, __, __, jp, jm},
+    /* IZM  */ {jm, jp, jp, jm, __, __},
+    /* IZP  */ {jp, jm, jm, jp, __, __}
+  };
+  constexpr uint8_t invert_orth_orientation[6][6] = {
+                    /* neighbour */
+    /* face *//*  IX      IY      IZ*/
+    /* IXM  */ {__, __,  1,  0,  1,  0},
+    /* IXP  */ {__, __,  0,  1,  1,  0},
+    /* IYM  */ { 1,  0, __, __,  0,  0},
+    /* IYP  */ { 0,  1, __, __,  0,  0},
+    /* IZM  */ { 1,  1,  0,  0, __, __},
+    /* IZP  */ { 0,  0,  0,  0, __, __}
+  };
+  const uint8_t boundary_side = boundary_neighbour_side[face][info.neighbour_face];
+  const uint8_t invert_orth   = invert_orth_orientation[face][info.neighbour_face];
+
+  if (boundary_side == __)
+    throw std::runtime_error("Selected faces are not neighbour to each other.");
+
+  info.i = (boundary_side & 1) ? end - 1 - ghost_id : beg + ghost_id;
+  info.j = invert_orth ? end - 1 + Ng - orth_dir : orth_dir;
+  if (boundary_side > 1) Kokkos::kokkos_swap(info.i, info.j);
+
+  return info;
+}
+
+KOKKOS_INLINE_FUNCTION
+Pos mapShell(IFace face, real_t x, real_t y, real_t z) {
+  const real_t s = Kokkos::tan(M_PI_4 * x);
+  const real_t t = Kokkos::tan(M_PI_4 * y);
+  const real_t d = Kokkos::sqrt(1 + s*s + t*t);
+
+  Pos p;
+  switch(face) {
+    case IXP: p = { 1, -s, -t}; break;
+    case IXM: p = {-1, -s,  t}; break;
+    case IYP: p = {-s,  1,  t}; break;
+    case IYM: p = {-s, -1, -t}; break;
+    case IZP: p = {-s, -t,  1}; break;
+    case IZM: p = {-s,  t, -1}; break;
+  };
+
+  return z * p / d;
+} 
+
 KOKKOS_INLINE_FUNCTION
 Pos getPos(const Params& params, int i, int j, int k) {
   return {params.xmin + (i-params.ibeg+0.5) * params.dx,
@@ -233,16 +352,17 @@ Params readInifile(std::string filename) {
   res.filename_out = reader.Get("run", "output_filename", "run");
 
   std::string tmp;
-  tmp = reader.Get("run", "boundaries_x", "reflecting");
+  tmp = reader.Get("run", "boundaries_x", "cubed_sphere");
   std::map<std::string, BoundaryType> bc_map{
     {"reflecting",           BC_REFLECTING},
     {"absorbing",            BC_ABSORBING},
     {"periodic",             BC_PERIODIC},
     {"C91",                  BC_C91},
-    {"triple_layer_damping", BC_TRILAYER_DAMPING}
+    {"triple_layer_damping", BC_TRILAYER_DAMPING},
+    {"cubed_sphere",         BC_CUBED_SPHERE}
   };
   res.boundary_x = bc_map[tmp];
-  tmp = reader.Get("run", "boundaries_y", "reflecting");
+  tmp = reader.Get("run", "boundaries_y", "cubed_sphere");
   res.boundary_y = bc_map[tmp];
   tmp = reader.Get("run", "boundaries_z", "reflecting");
   res.boundary_z = bc_map[tmp];
@@ -348,14 +468,15 @@ Params readInifile(std::string filename) {
   res.seed = reader.GetInteger("misc", "seed", 12345);
   res.log_frequency = reader.GetInteger("misc", "log_frequency", 10);
 
-
   // Parallel ranges
-  res.range_tot = ParallelRange({0, 0, 0}, {res.Ntx, res.Nty, res.Ntz});
-  res.range_dom = ParallelRange({res.ibeg, res.jbeg, res.kbeg}, {res.iend, res.jend, res.kend});
-  res.range_xbound = ParallelRange({0, res.jbeg, res.kbeg}, {res.Ng, res.jend, res.kend});
-  res.range_ybound = ParallelRange({0, 0, res.kbeg}, {res.Ntx, res.Ng, res.kend});
-  res.range_zbound = ParallelRange({0, 0, 0}, {res.Ntx, res.Nty, res.Ng});
-  res.range_slopes = ParallelRange({res.ibeg-1, res.jbeg-1, res.kbeg-1}, {res.iend+1, res.jend+1, res.kend+1});
+  res.range_tot    = ParallelRange({0, 0,          0,          0},           {Ngrids, res.Ntx,    res.Nty,    res.Ntz});
+  res.range_dom    = ParallelRange({0, res.ibeg,   res.jbeg,   res.kbeg},    {Ngrids, res.iend,   res.jend,   res.kend});
+  res.range_xbound = ParallelRange({0, 0,          res.jbeg,   res.kbeg},    {Ngrids, res.Ng,     res.jend,   res.kend});
+  res.range_ybound = ParallelRange({0, 0,          0,          res.kbeg},    {Ngrids, res.Ntx,    res.Ng,     res.kend});
+  // res.range_xbound = ParallelRange({0, 0,          res.jbeg,   res.kbeg},    {Ngrids, res.Ng,     res.jend,   res.kend});
+  // res.range_ybound = ParallelRange({0, res.ibeg,   0,          res.kbeg},    {Ngrids, res.iend,   res.Ng,     res.kend});
+  res.range_zbound = ParallelRange({0, res.ibeg,   res.jbeg,   0},           {Ngrids, res.iend,   res.jend,   res.Ng});
+  res.range_slopes = ParallelRange({0, res.ibeg-1, res.jbeg-1, res.kbeg-1},  {Ngrids, res.iend+1, res.jend+1, res.kend+1});
 
   return res;
 } 
@@ -368,21 +489,52 @@ namespace fv3d {
 void consToPrim(Array U, Array Q, const Params &params) {
   Kokkos::parallel_for( "Conservative to Primitive", 
                         params.range_tot,
-                        KOKKOS_LAMBDA(const int i, const int j, const int k) {
-                          State Uloc = getStateFromArray(U, i, j, k);
+                        KOKKOS_LAMBDA(const IFace face, const int i, const int j, const int k) {
+                          State Uloc = getStateFromArray(U, face, i, j, k);
                           State Qloc = consToPrim(Uloc, params);
-                          setStateInArray(Q, i, j, k, Qloc);
+                          setStateInArray(Q, face, i, j, k, Qloc);
                         });
 }
-
 void primToCons(Array &Q, Array &U, const Params &params) {
   Kokkos::parallel_for( "Primitive to Conservative", 
                         params.range_tot,
-                        KOKKOS_LAMBDA(const int i, const int j, const int k) {
-                          State Qloc = getStateFromArray(Q, i, j, k);
+                        KOKKOS_LAMBDA(const IFace face, const int i, const int j, const int k) {
+                          State Qloc = getStateFromArray(Q, face, i, j, k);
                           State Uloc = primToCons(Qloc, params);
-                          setStateInArray(U, i, j, k, Uloc);
+                          setStateInArray(U, face, i, j, k, Uloc);
                         });
+}
+void checkNegatives(Array &Q, const Params &full_params) {
+  uint64_t negative_density  = 0;
+  uint64_t negative_pressure = 0;
+  uint64_t nan_count = 0;
+
+  Kokkos::parallel_reduce(
+    "Check negative density/pressure", 
+    full_params.range_dom,
+    KOKKOS_LAMBDA(const IFace face, const int i, const int j, const int k, uint64_t& lnegative_density, uint64_t& lnegative_pressure, uint64_t& lnan_count) {
+      constexpr real_t eps = 1.0e-6;
+      if (Q(face, k, j, i, IR) < 0) {
+        Q(face, k, j, i, IR) = eps;
+        lnegative_density++;
+      }
+      if (Q(face, k, j, i, IP) < 0) {
+        Q(face, k, j, i, IP) = eps;
+        lnegative_pressure++;
+      }
+
+      for (int ivar=0; ivar < Nfields; ++ivar)
+        if (std::isnan(Q(face, k, j, i, ivar)))
+          lnan_count++;
+
+    }, negative_density, negative_pressure, nan_count);
+
+    if (negative_density) 
+      std::cout << "--> negative density: " << negative_density << std::endl;
+    if (negative_pressure)
+      std::cout << "--> negative pressure: " << negative_pressure << std::endl;
+    if (nan_count)
+      std::cout << "--> NaN detected." << std::endl;
 }
 
 }

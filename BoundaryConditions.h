@@ -11,15 +11,15 @@ namespace fv3d {
    * @brief Absorbing conditions
    */
   KOKKOS_INLINE_FUNCTION
-  State fillAbsorbing(Array Q, int iref, int jref, int kref) {
-    return getStateFromArray(Q, iref, jref, kref);
+  State fillAbsorbing(Array Q, IFace face, int iref, int jref, int kref) {
+    return getStateFromArray(Q, face, iref, jref, kref);
   };
 
   /**
    * @brief Reflecting boundary conditions
    */
   KOKKOS_INLINE_FUNCTION
-  State fillReflecting(Array Q, int i, int j, int k, int iref, int jref, int kref, IDir dir, const Params &params) {
+  State fillReflecting(Array Q, IFace face, int i, int j, int k, int iref, int jref, int kref, IDir dir, const Params &params) {
     int isym, jsym, ksym;
     if (dir == IX) {
       int ipiv = (i < iref ? params.ibeg : params.iend);
@@ -40,7 +40,7 @@ namespace fv3d {
       ksym = 2*kpiv - k - 1;
     }
 
-    State q = getStateFromArray(Q, isym, jsym, ksym);
+    State q = getStateFromArray(Q, face, isym, jsym, ksym);
   
     if (dir == IX)
       q[IU] *= -1.0;
@@ -57,7 +57,7 @@ namespace fv3d {
    * 
    */
   KOKKOS_INLINE_FUNCTION
-  State fillPeriodic(Array Q, int i, int j, int k, IDir dir, const Params &params) {
+  State fillPeriodic(Array Q, IFace face, int i, int j, int k, IDir dir, const Params &params) {
     if (dir == IX) {
       if (i < params.ibeg)
         i += params.Nx;
@@ -77,14 +77,25 @@ namespace fv3d {
         k -= params.Nz;
     }
 
-    return getStateFromArray(Q, i, j, k);
+    return getStateFromArray(Q, face, i, j, k);
+  }
+
+  /**
+   * @brief Cubed-Sphere boundary conditions
+   * 
+   */
+  KOKKOS_INLINE_FUNCTION
+  State fillCubedSphere(Array Q, IFace face, int i, int j, int k, IDir dir, ISide side, const Params &params) {
+    const auto [neighbour_face, ii, jj] = getGridNeighbourIndex(face, dir, side, i, j, params);
+
+    return getStateFromArray(Q, neighbour_face, ii, jj, k);
   }
 
   /**
    * @brief C91 bounary conditions
    */
   KOKKOS_INLINE_FUNCTION
-  State fillC91(Array Q, int i, int j, int k, int kref, IDir dir, const Params &params) {
+  State fillC91(Array Q, IFace face, int i, int j, int k, int kref, IDir dir, const Params &params) {
     if (dir != IZ)
       return {}; // Should not be called on a direction that is not vertical
     
@@ -92,8 +103,8 @@ namespace fv3d {
     int ksym = 2*kpiv - k - 1;
     
     Pos pos = getPos(params, i, j, k);
-    State qref = getStateFromArray(Q, i, j, kref);
-    State qsym = getStateFromArray(Q, i, j, ksym);
+    State qref = getStateFromArray(Q, face, i, j, kref);
+    State qsym = getStateFromArray(Q, face, i, j, ksym);
 
     State res;
     if (k < params.kbeg) // top
@@ -138,7 +149,7 @@ namespace fv3d {
    * @brief Experimental stuff for tri-layer
    */
   KOKKOS_INLINE_FUNCTION
-  State fillTriLayerDamping(Array Q, int i, int j, int k, int iref, int jref, int kref, IDir dir, const Params &params) {
+  State fillTriLayerDamping(Array Q, IFace face, int i, int j, int k, int iref, int jref, int kref, IDir dir, const Params &params) {
     if (dir == IZ && k < 0) {
       Pos pos = getPos(params, i, j, k);
       const real_t T0 = params.iso3_T0;
@@ -153,7 +164,7 @@ namespace fv3d {
 
       State q;
 
-      q = getStateFromArray(Q, i, j, kref);
+      q = getStateFromArray(Q, face, i, j, kref);
       q[IR] = rho;
       // q[IU] = 0.0;
       // q[IV] = 0.0;
@@ -161,7 +172,7 @@ namespace fv3d {
       return q;
     }
     else
-      return fillAbsorbing(Q, iref, jref, kref);
+      return fillAbsorbing(Q, face, iref, jref, kref);
   }
 } // anonymous namespace
 
@@ -182,67 +193,69 @@ public:
 
     Kokkos::parallel_for( "Filling X-boundary",
                           params.range_xbound,
-                          KOKKOS_LAMBDA(int i, int j, int k) {
+                          KOKKOS_LAMBDA(IFace face, int i, int j, int k) {
 
                             int ileft     = i;
                             int iright    = params.iend+i;
                             int iref_left = params.ibeg;
                             int iref_right = params.iend-1;
 
-                            auto fill = [&](int i, int iref) {
+                            auto fill = [&](int i, int iref, ISide side) {
                               switch (bc_x) {
-                                case BC_ABSORBING:  return fillAbsorbing(Q, iref, j, k); break;
-                                case BC_REFLECTING: return fillReflecting(Q, i, j, k, iref, j, k, IX, params); break;
-                                default:            return fillPeriodic(Q, i, j, k, IX, params); break;
+                                case BC_ABSORBING:    return fillAbsorbing(Q, face, iref, j, k); break;
+                                case BC_REFLECTING:   return fillReflecting(Q, face, i, j, k, iref, j, k, IX, params); break;
+                                case BC_CUBED_SPHERE: return fillCubedSphere(Q, face, i, j, k, IX, side, params); break;
+                                default:              return fillPeriodic(Q, face, i, j, k, IX, params); break;
                               }
                             };
 
-                            setStateInArray(Q, ileft,  j, k, fill(ileft, iref_left));
-                            setStateInArray(Q, iright, j, k, fill(iright, iref_right));
+                            setStateInArray(Q, face, ileft,  j, k, fill(ileft,  iref_left,  ILEFT));
+                            setStateInArray(Q, face, iright, j, k, fill(iright, iref_right, IRIGHT));
                           });
 
     Kokkos::parallel_for( "Filling Y-boundary",
                           params.range_ybound,
-                          KOKKOS_LAMBDA(int i, int j, int k) {
+                          KOKKOS_LAMBDA(IFace face, int i, int j, int k) {
 
-                            int jtop     = j;
-                            int jbot     = params.jend+j;
-                            int jref_top = params.jbeg;
-                            int jref_bot = params.jend-1;
+                            int jbot     = j;
+                            int jtop     = params.jend+j;
+                            int jref_bot = params.jbeg;
+                            int jref_top = params.jend-1;
 
-                            auto fill = [&](int j, int jref) {
+                            auto fill = [&](int j, int jref, ISide side) {
                               switch (bc_y) {
-                                case BC_ABSORBING:  return fillAbsorbing(Q, i, jref, k); break;
-                                case BC_REFLECTING: return fillReflecting(Q, i, j, k, i, jref, k, IY, params); break;
-                                default:            return fillPeriodic(Q, i, j, k, IY, params); break;
+                                case BC_ABSORBING:    return fillAbsorbing(Q, face, i, jref, k); break;
+                                case BC_REFLECTING:   return fillReflecting(Q, face, i, j, k, i, jref, k, IY, params); break;
+                                case BC_CUBED_SPHERE: return fillCubedSphere(Q, face, i, j, k, IY, side, params); break;
+                                default:              return fillPeriodic(Q, face, i, j, k, IY, params); break;
                               }
                             };
 
-                            setStateInArray(Q, i, jtop, k, fill(jtop, jref_top));
-                            setStateInArray(Q, i, jbot, k, fill(jbot, jref_bot));
+                            setStateInArray(Q, face, i, jbot, k, fill(jbot, jref_bot, ILEFT));
+                            setStateInArray(Q, face, i, jtop, k, fill(jtop, jref_top, IRIGHT));
                           });
 
     Kokkos::parallel_for( "Filling Z-boundary",
                           params.range_zbound,
-                          KOKKOS_LAMBDA(int i, int j, int k) {
+                          KOKKOS_LAMBDA(IFace face, int i, int j, int k) {
 
-                            int kfront     = k;
-                            int kback      = params.kend+k;
-                            int kref_front = params.kbeg;
-                            int kref_back  = params.kend-1;
+                            int kback     = k;
+                            int kfront      = params.kend+k;
+                            int kref_back = params.kbeg;
+                            int kref_front  = params.kend-1;
 
                             auto fill = [&](int k, int kref) {
                               switch (bc_z) {
-                                case BC_ABSORBING:        return fillAbsorbing(Q, i, j, kref); break;
-                                case BC_REFLECTING:       return fillReflecting(Q, i, j, k, i, j, kref, IZ, params); break;
-                                case BC_C91:              return fillC91(Q, i, j, k, kref, IZ, params); break;
-                                case BC_TRILAYER_DAMPING: return fillTriLayerDamping(Q, i, j, k, i, j, kref, IZ, params); break;
-                                default:                  return fillPeriodic(Q, i, j, k, IZ, params); break;
+                                case BC_ABSORBING:        return fillAbsorbing(Q, face, i, j, kref); break;
+                                case BC_REFLECTING:       return fillReflecting(Q, face, i, j, k, i, j, kref, IZ, params); break;
+                                case BC_C91:              return fillC91(Q, face, i, j, k, kref, IZ, params); break;
+                                case BC_TRILAYER_DAMPING: return fillTriLayerDamping(Q, face, i, j, k, i, j, kref, IZ, params); break;
+                                default:                  return fillPeriodic(Q, face, i, j, k, IZ, params); break;
                               }
                             };
 
-                            setStateInArray(Q, i, j, kfront, fill(kfront, kref_front));
-                            setStateInArray(Q, i, j, kback,  fill(kback,  kref_back));
+                            setStateInArray(Q, face, i, j, kback,  fill(kback,  kref_back));
+                            setStateInArray(Q, face, i, j, kfront, fill(kfront, kref_front));
                           });
   }
 };

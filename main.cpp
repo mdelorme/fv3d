@@ -25,9 +25,8 @@ int main(int argc, char **argv) {
     auto params = readInifile(argv[1]);
 
     // Allocating main views
-    Array U    = Kokkos::View<real_t****>("U",    params.Ntz, params.Nty, params.Ntx, Nfields);
-    Array Unew = Kokkos::View<real_t****>("Unew", params.Ntz, params.Nty, params.Ntx, Nfields);
-    Array Q    = Kokkos::View<real_t****>("Q",    params.Ntz, params.Nty, params.Ntx, Nfields);
+    Array U    = Array("U", Ngrids, params.Ntz, params.Nty, params.Ntx, Nfields);
+    Array Q    = Array("Q", Ngrids, params.Ntz, params.Nty, params.Ntx, Nfields);
 
 
     // Misc vars for iteration
@@ -47,6 +46,7 @@ int main(int argc, char **argv) {
       ite = restart_info.iteration;
       std::cout << "Restart at iteration " << ite << " and time " << t << std::endl;
       next_save = t + params.save_freq;
+      ite++;
     }
     else
       init.init(Q);
@@ -56,11 +56,8 @@ int main(int argc, char **argv) {
     int next_log = 0;
 
     while (t + params.epsilon < params.tend) {
-      Kokkos::deep_copy(Unew, U);
-      
-      bool save_needed = (t + params.epsilon > next_save);
+      bool save_needed = true; //(t + params.epsilon > next_save);
 
-      consToPrim(U, Q, params);
       dt = computeDt.computeDt(Q, (ite == 0 ? params.save_freq : next_save-t), t, next_log == 0);
       if (next_log == 0)
         next_log = params.log_frequency;
@@ -73,9 +70,9 @@ int main(int argc, char **argv) {
         next_save += params.save_freq;
       }
 
-      update.update(Q, Unew, dt);
-
-      Kokkos::deep_copy(U, Unew);
+      update.update(Q, U, dt);
+      consToPrim(U, Q, params);
+      checkNegatives(Q, params);
 
       t += dt;
     }

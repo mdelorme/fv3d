@@ -3,18 +3,18 @@
 namespace fv3d {
 
 KOKKOS_INLINE_FUNCTION
-State getStateFromArray(Array arr, int i, int j, int k) {
-  return {arr(k, j, i, IR),
-          arr(k, j, i, IU),
-          arr(k, j, i, IV),
-          arr(k, j, i, IW),
-          arr(k, j, i, IP)};
+State getStateFromArray(Array arr, IFace face, int i, int j, int k) {
+  return {arr(face, k, j, i, IR),
+          arr(face, k, j, i, IU),
+          arr(face, k, j, i, IV),
+          arr(face, k, j, i, IW),
+          arr(face, k, j, i, IP)};
 } 
 
 KOKKOS_INLINE_FUNCTION
-void setStateInArray(Array arr, int i, int j, int k, State st) {
+void setStateInArray(Array arr, IFace face, int i, int j, int k, State st) {
   for (int ivar=0; ivar < Nfields; ++ivar)
-    arr(k, j, i, ivar) = st[ivar];
+    arr(face, k, j, i, ivar) = st[ivar];
 }
 
 KOKKOS_INLINE_FUNCTION

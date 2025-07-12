@@ -52,7 +52,7 @@ public:
     Kokkos::parallel_for(
       "Thermal conduction", 
       params.range_dom,
-      KOKKOS_LAMBDA(const int i, const int j, const int k) {
+      KOKKOS_LAMBDA(const IFace face, const int i, const int j, const int k) {
         Pos pos = getPos(params, i, j, k);
         real_t x = pos[IX];
         real_t y = pos[IY];
@@ -66,13 +66,13 @@ public:
         real_t kappaB = 0.5 * (computeKappa(x, y, z, params) + computeKappa(x, y, z+dz, params));
 
         // Ideal EOS with R = 1 assumed. T = P/rho
-        real_t TC = Q(k, j, i,   IP) / Q(k, j, i,   IR);
-        real_t TL = Q(k, j, i-1, IP) / Q(k, j, i-1, IR);
-        real_t TR = Q(k, j, i+1, IP) / Q(k, j, i+1, IR);
-        real_t TU = Q(k, j-1, i, IP) / Q(k, j-1, i, IR);
-        real_t TD = Q(k, j+1, i, IP) / Q(k, j+1, i, IR);
-        real_t TF = Q(k-1, j, i, IP) / Q(k-1, j, i, IR);
-        real_t TB = Q(k+1, j, i, IP) / Q(k+1, j, i, IR);
+        real_t TC = Q(face, k, j, i,   IP) / Q(face, k, j, i,   IR);
+        real_t TL = Q(face, k, j, i-1, IP) / Q(face, k, j, i-1, IR);
+        real_t TR = Q(face, k, j, i+1, IP) / Q(face, k, j, i+1, IR);
+        real_t TU = Q(face, k, j-1, i, IP) / Q(face, k, j-1, i, IR);
+        real_t TD = Q(face, k, j+1, i, IP) / Q(face, k, j+1, i, IR);
+        real_t TF = Q(face, k-1, j, i, IP) / Q(face, k-1, j, i, IR);
+        real_t TB = Q(face, k+1, j, i, IP) / Q(face, k+1, j, i, IR);
 
         // Computing thermal flux
         real_t FL = kappaL * (TC - TL) / dx;
@@ -106,7 +106,7 @@ public:
         }
 
         // And updating using a Godunov-like scheme
-        Unew(k, j, i, IE) += dt/dx * (FR - FL) + dt/dy * (FD - FU) + dt/dz * (FB - FF);
+        Unew(face, k, j, i, IE) += dt/dx * (FR - FL) + dt/dy * (FD - FU) + dt/dz * (FB - FF);
       });
   }
 };
