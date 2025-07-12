@@ -19,7 +19,7 @@ namespace fv3d {
    * @brief Reflecting boundary conditions
    */
   KOKKOS_INLINE_FUNCTION
-  State fillReflecting(Array Q, int i, int j, int k, int iref, int jref, int kref, IDir dir, const Params &params) {
+  State fillReflecting(Array Q, int i, int j, int k, int iref, int jref, int kref, IDir dir, const DeviceParams &params) {
     int isym, jsym, ksym;
     if (dir == IX) {
       int ipiv = (i < iref ? params.ibeg : params.iend);
@@ -57,7 +57,7 @@ namespace fv3d {
    * 
    */
   KOKKOS_INLINE_FUNCTION
-  State fillPeriodic(Array Q, int i, int j, int k, IDir dir, const Params &params) {
+  State fillPeriodic(Array Q, int i, int j, int k, IDir dir, const DeviceParams &params) {
     if (dir == IX) {
       if (i < params.ibeg)
         i += params.Nx;
@@ -84,7 +84,7 @@ namespace fv3d {
    * @brief C91 bounary conditions
    */
   KOKKOS_INLINE_FUNCTION
-  State fillC91(Array Q, int i, int j, int k, int kref, IDir dir, const Params &params) {
+  State fillC91(Array Q, int i, int j, int k, int kref, IDir dir, const DeviceParams &params) {
     if (dir != IZ)
       return {}; // Should not be called on a direction that is not vertical
     
@@ -137,20 +137,20 @@ namespace fv3d {
 
 class BoundaryManager {
 public:
-  Params params;
+  Params full_params;
 
-  BoundaryManager(const Params &params) 
-    : params(params) {};
+  BoundaryManager(const Params &full_params) 
+    : full_params(full_params) {};
   ~BoundaryManager() = default;
 
   void fillBoundaries(Array Q) {
+    auto &params = full_params.device_params;
     auto bc_x = params.boundary_x;
     auto bc_y = params.boundary_y;
     auto bc_z = params.boundary_z;
-    auto params = this->params;
 
     Kokkos::parallel_for( "Filling X-boundary",
-                          params.range_xbound,
+                          full_params.range_xbound,
                           KOKKOS_LAMBDA(int i, int j, int k) {
 
                             int ileft     = i;
@@ -171,7 +171,7 @@ public:
                           });
 
     Kokkos::parallel_for( "Filling Y-boundary",
-                          params.range_ybound,
+                          full_params.range_ybound,
                           KOKKOS_LAMBDA(int i, int j, int k) {
 
                             int jtop     = j;
@@ -192,7 +192,7 @@ public:
                           });
 
     Kokkos::parallel_for( "Filling Z-boundary",
-                          params.range_zbound,
+                          full_params.range_zbound,
                           KOKKOS_LAMBDA(int i, int j, int k) {
 
                             int kfront     = k;
