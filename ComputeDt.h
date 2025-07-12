@@ -8,16 +8,14 @@ namespace fv3d {
 
 class ComputeDtFunctor {
 public:
-  Params params;
+  Params full_params;
 
-  ComputeDtFunctor(const Params &params)
-    : params(params) {};
+  ComputeDtFunctor(const Params &full_params)
+    : full_params(full_params) {};
   ~ComputeDtFunctor() = default;
 
   real_t computeDt(Array Q, real_t max_dt, real_t t, bool diag) const {
-    using DtArray = Kokkos::Array<real_t, 3>;
-
-    auto params = this->params;
+    auto &params = full_params.device_params;
 
     real_t inv_dt_hyp = 0.0;
     real_t inv_dt_par_tc = 0.0;
@@ -26,7 +24,7 @@ public:
     using Kokkos::fmax;
 
     Kokkos::parallel_reduce("Computing DT",
-                            params.range_dom,
+                            full_params.range_dom,
                             KOKKOS_LAMBDA(IFace face, int i, int j, int k, real_t &inv_dt_hyp, real_t &inv_dt_par_tc, real_t &inv_dt_par_visc) {
                               // Hydro time-step
                               State q = getStateFromArray(Q, face, i, j, k);

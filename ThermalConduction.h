@@ -5,7 +5,7 @@
 namespace fv3d {
 
 KOKKOS_INLINE_FUNCTION
-real_t computeKappa(real_t x, real_t y, real_t z, const Params &params) {
+real_t computeKappa(real_t x, real_t y, real_t z, const DeviceParams &params) {
   real_t res;
   switch (params.thermal_conductivity_mode) {
     case TCM_B02:
@@ -37,21 +37,21 @@ real_t computeKappa(real_t x, real_t y, real_t z, const Params &params) {
 
 class ThermalConductionFunctor {
 public:
-  Params params;
+  Params full_params;
 
-  ThermalConductionFunctor(const Params &params) 
-    : params(params) {};
+  ThermalConductionFunctor(const Params &full_params) 
+    : full_params(full_params) {};
   ~ThermalConductionFunctor() = default;
 
   void applyThermalConduction(Array Q, Array Unew, real_t dt) {
-    auto params = this->params;
+    auto &params = full_params.device_params;
     const real_t dx = params.dx;
     const real_t dy = params.dy;
     const real_t dz = params.dz;
 
     Kokkos::parallel_for(
       "Thermal conduction", 
-      params.range_dom,
+      full_params.range_dom,
       KOKKOS_LAMBDA(const IFace face, const int i, const int j, const int k) {
         Pos pos = getPos(params, i, j, k);
         real_t x = pos[IX];

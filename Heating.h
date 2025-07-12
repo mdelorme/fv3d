@@ -7,7 +7,7 @@ namespace fv3d {
 namespace {
 
 KOKKOS_INLINE_FUNCTION
-real_t cooling_layer(Array Q, const IFace face, const int i, const int j, const int k, const Params &params) {
+real_t cooling_layer(Array Q, const IFace face, const int i, const int j, const int k, const DeviceParams &params) {
   Pos pos = getPos(params, i, j, k);
   real_t z = pos[IZ];
   real_t kappa = params.kappa*params.iso3_k2; //*params.gamma0/(params.gamma0-1.0);
@@ -24,18 +24,18 @@ real_t cooling_layer(Array Q, const IFace face, const int i, const int j, const 
 
 class HeatingFunctor {
 public:
-  Params params;
+  Params full_params;
 
-  HeatingFunctor(const Params &params)
-    : params(params) {};
+  HeatingFunctor(const Params &full_params)
+    : full_params(full_params) {};
   ~HeatingFunctor() = default;
 
   void applyHeating(Array Q, Array Unew, real_t dt) {
-    auto params = this->params;
+    auto &params = full_params.device_params;
 
     Kokkos::parallel_for(
       "Heating",
-      params.range_dom,
+      full_params.range_dom,
       KOKKOS_LAMBDA(const IFace face, const int i, const int j, const int k) {
         real_t q;
 

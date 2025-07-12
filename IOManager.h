@@ -96,9 +96,10 @@ namespace {
 class IOManager {
 public:
   Params params;
+  DeviceParams &device_params;
 
   IOManager(Params &params)
-    : params(params) {};
+    : params(params), device_params(params.device_params) {};
 
   ~IOManager() = default;
 
@@ -123,29 +124,29 @@ public:
     File file(h5_filename, File::Truncate);
     FILE* xdmf_fd = fopen(xmf_filename.c_str(), "w+");
 
-    file.createAttribute("Ntx", params.Ntx);
-    file.createAttribute("Nty", params.Nty);
-    file.createAttribute("Ntz", params.Ntz);
-    file.createAttribute("Nx", params.Nx);
-    file.createAttribute("Ny", params.Ny);
-    file.createAttribute("Nz", params.Nz);
-    file.createAttribute("ibeg", params.ibeg);
-    file.createAttribute("iend", params.iend);
-    file.createAttribute("jbeg", params.jbeg);
-    file.createAttribute("jend", params.jend);
-    file.createAttribute("kbeg", params.kbeg);
-    file.createAttribute("kend", params.kend);
+    file.createAttribute("Ntx", device_params.Ntx);
+    file.createAttribute("Nty", device_params.Nty);
+    file.createAttribute("Ntz", device_params.Ntz);
+    file.createAttribute("Nx", device_params.Nx);
+    file.createAttribute("Ny", device_params.Ny);
+    file.createAttribute("Nz", device_params.Nz);
+    file.createAttribute("ibeg", device_params.ibeg);
+    file.createAttribute("iend", device_params.iend);
+    file.createAttribute("jbeg", device_params.jbeg);
+    file.createAttribute("jend", device_params.jend);
+    file.createAttribute("kbeg", device_params.kbeg);
+    file.createAttribute("kend", device_params.kend);
     file.createAttribute("problem", params.problem);
     file.createAttribute("iteration", iteration);
 
     std::vector<real_t> x, y, z;
     // -- vertex pos
-    for (int k=params.kbeg; k <= params.kend; ++k) {
-      for (int j=params.jbeg; j <= params.jend; ++j) {
-        for (int i=params.ibeg; i <= params.iend; ++i) {
-          x.push_back((i-params.ibeg) * params.dx);
-          y.push_back((j-params.jbeg) * params.dy);
-          z.push_back((k-params.kbeg) * params.dz);
+    for (int k=device_params.kbeg; k <= device_params.kend; ++k) {
+      for (int j=device_params.jbeg; j <= device_params.jend; ++j) {
+        for (int i=device_params.ibeg; i <= device_params.iend; ++i) {
+          x.push_back((i-device_params.ibeg) * device_params.dx);
+          y.push_back((j-device_params.jbeg) * device_params.dy);
+          z.push_back((k-device_params.kbeg) * device_params.dz);
         }
       }
     }
@@ -160,9 +161,9 @@ public:
     Kokkos::deep_copy(Qhost, Q);
 
     Table trho, tu, tv, tw, tprs;
-    for (int k=params.kbeg; k<params.kend; ++k) {
-      for (int j=params.jbeg; j<params.jend; ++j) {
-        for (int i=params.ibeg; i<params.iend; ++i) {
+    for (int k=device_params.kbeg; k<device_params.kend; ++k) {
+      for (int j=device_params.jbeg; j<device_params.jend; ++j) {
+        for (int i=device_params.ibeg; i<device_params.iend; ++i) {
           real_t rho = Qhost(k, j, i, IR);
           real_t u   = Qhost(k, j, i, IU);
           real_t v   = Qhost(k, j, i, IV);
@@ -187,11 +188,11 @@ public:
 
     std::string empty_string = "";
 
-    fprintf(xdmf_fd, str_xdmf_header, format_xdmf_header(params, path));
+    fprintf(xdmf_fd, str_xdmf_header, format_xdmf_header(device_params, path));
     fprintf(xdmf_fd, str_xdmf_ite_header, t);
-    fprintf(xdmf_fd, str_xdmf_scalar_field, format_xdmf_scalar_field(params, path, empty_string, "rho"));
-    fprintf(xdmf_fd, str_xdmf_vector_field, format_xdmf_vector_field(params, path, empty_string, "velocity", "u", "v", "w"));
-    fprintf(xdmf_fd, str_xdmf_scalar_field, format_xdmf_scalar_field(params, path, empty_string, "prs"));
+    fprintf(xdmf_fd, str_xdmf_scalar_field, format_xdmf_scalar_field(device_params, path, empty_string, "rho"));
+    fprintf(xdmf_fd, str_xdmf_vector_field, format_xdmf_vector_field(device_params, path, empty_string, "velocity", "u", "v", "w"));
+    fprintf(xdmf_fd, str_xdmf_scalar_field, format_xdmf_scalar_field(device_params, path, empty_string, "prs"));
     fprintf(xdmf_fd, "%s", str_xdmf_ite_footer);
     fprintf(xdmf_fd, "%s", str_xdmf_footer);
     fclose(xdmf_fd);
@@ -209,33 +210,33 @@ public:
     FILE* xdmf_fd = fopen((params.filename_out + ".xdmf").c_str(), flag_xdmf);
 
     if (iteration == 0) {
-      file.createAttribute("Ntx", params.Ntx);
-      file.createAttribute("Nty", params.Nty);
-      file.createAttribute("Ntz", params.Ntz);
-      file.createAttribute("Nx", params.Nx);
-      file.createAttribute("Ny", params.Ny);
-      file.createAttribute("Nz", params.Nz);
-      file.createAttribute("ibeg", params.ibeg);
-      file.createAttribute("iend", params.iend);
-      file.createAttribute("jbeg", params.jbeg);
-      file.createAttribute("jend", params.jend);
-      file.createAttribute("kbeg", params.kbeg);
-      file.createAttribute("kend", params.kend);
+      file.createAttribute("Ntx", device_params.Ntx);
+      file.createAttribute("Nty", device_params.Nty);
+      file.createAttribute("Ntz", device_params.Ntz);
+      file.createAttribute("Nx", device_params.Nx);
+      file.createAttribute("Ny", device_params.Ny);
+      file.createAttribute("Nz", device_params.Nz);
+      file.createAttribute("ibeg", device_params.ibeg);
+      file.createAttribute("iend", device_params.iend);
+      file.createAttribute("jbeg", device_params.jbeg);
+      file.createAttribute("jend", device_params.jend);
+      file.createAttribute("kbeg", device_params.kbeg);
+      file.createAttribute("kend", device_params.kend);
       file.createAttribute("problem", params.problem);
       file.createAttribute("iteration", iteration);
 
-      fprintf(xdmf_fd, str_xdmf_header, format_xdmf_header(params));
+      fprintf(xdmf_fd, str_xdmf_header, format_xdmf_header(device_params));
 
       for (auto [face, facename] : facename_map) {
         std::vector<real_t> x, y, z;
         // -- vertex pos
-        for (int k=params.kbeg; k <= params.kend; ++k) {
-          for (int j=params.jbeg; j <= params.jend; ++j) {
-            for (int i=params.ibeg; i <= params.iend; ++i) {
+        for (int k=device_params.kbeg; k <= device_params.kend; ++k) {
+          for (int j=device_params.jbeg; j <= device_params.jend; ++j) {
+            for (int i=device_params.ibeg; i <= device_params.iend; ++i) {
               const Pos p = mapShell(face, 
-                params.xmin + (i-params.ibeg) * params.dx,
-                params.ymin + (j-params.jbeg) * params.dy,
-                params.zmin + (k-params.kbeg) * params.dz
+                device_params.xmin + (i-device_params.ibeg) * device_params.dx,
+                device_params.ymin + (j-device_params.jbeg) * device_params.dy,
+                device_params.zmin + (k-device_params.kbeg) * device_params.dz
               );
               x.push_back(p[IX]);
               y.push_back(p[IY]);
@@ -247,7 +248,7 @@ public:
         file.createDataSet(facename + "/x", x);
         file.createDataSet(facename + "/y", y);
         file.createDataSet(facename + "/z", z);
-        fprintf(xdmf_fd, str_xdmf_geometry, format_xdmf_geometry(params, params.filename_out, facename));
+        fprintf(xdmf_fd, str_xdmf_geometry, format_xdmf_geometry(device_params, params.filename_out, facename));
       }
       fprintf(xdmf_fd, "%s", str_xdmf_footer);
     }
@@ -264,13 +265,13 @@ public:
       auto grid_group = iteration_group.createGroup(facename);
 
       Table trho, tu, tv, tw, tprs;
-      for (int k=params.kbeg; k<params.kend; ++k) {
+      for (int k=device_params.kbeg; k<device_params.kend; ++k) {
         std::vector<std::vector<real_t>> rcrho, rcu, rcv, rcw, rcprs;
 
-        for (int j=params.jbeg; j<params.jend; ++j) {
+        for (int j=device_params.jbeg; j<device_params.jend; ++j) {
           std::vector<real_t> rrho, ru, rv, rw, rprs;
 
-          for (int i=params.ibeg; i<params.iend; ++i) {
+          for (int i=device_params.ibeg; i<device_params.iend; ++i) {
             real_t rho = Qhost(face, k, j, i, IR);
             real_t u   = Qhost(face, k, j, i, IU);
             real_t v   = Qhost(face, k, j, i, IV);
@@ -309,9 +310,9 @@ public:
     fprintf(xdmf_fd, str_xdmf_ite_header, t);
     for (auto [face, facename] : facename_map) {
       fprintf(xdmf_fd, str_xdmf_grid_header, format_xdmf_grid_header(facename));
-      fprintf(xdmf_fd, str_xdmf_scalar_field, format_xdmf_scalar_field(params, params.filename_out, iteration_str, facename, "rho"));
-      fprintf(xdmf_fd, str_xdmf_vector_field, format_xdmf_vector_field(params, params.filename_out, iteration_str, facename, "velocity", "u", "v", "w"));
-      fprintf(xdmf_fd, str_xdmf_scalar_field, format_xdmf_scalar_field(params, params.filename_out, iteration_str, facename, "prs"));
+      fprintf(xdmf_fd, str_xdmf_scalar_field, format_xdmf_scalar_field(device_params, params.filename_out, iteration_str, facename, "rho"));
+      fprintf(xdmf_fd, str_xdmf_vector_field, format_xdmf_vector_field(device_params, params.filename_out, iteration_str, facename, "velocity", "u", "v", "w"));
+      fprintf(xdmf_fd, str_xdmf_scalar_field, format_xdmf_scalar_field(device_params, params.filename_out, iteration_str, facename, "prs"));
       fprintf(xdmf_fd, "%s", str_xdmf_grid_footer);
     }
     fprintf(xdmf_fd, "%s", str_xdmf_ite_footer);
@@ -324,9 +325,9 @@ public:
 
     auto Nt = getShape(file, "rho")[0];
 
-    if (Nt != params.Nx*params.Ny*params.Nz) {
+    if (Nt != device_params.Nx*device_params.Ny*device_params.Nz) {
       std::cerr << "Attempting to restart with a different resolution ! Ncells (restart) = " << Nt << "; Run resolution = " 
-                << params.Nx << "x" << params.Ny << "x" << params.Nz << "=" << params.Nx*params.Ny*params.Nz << std::endl;
+                << device_params.Nx << "x" << device_params.Ny << "x" << device_params.Nz << "=" << device_params.Nx*device_params.Ny*device_params.Nz << std::endl;
       throw std::runtime_error("ERROR : Trying to restart from a file with a different resolution !");
     }
 
@@ -342,10 +343,10 @@ public:
       auto table = load<Table>(file, var_name);
       // Parallel for here ?
       int lid = 0;
-      for (int z=0; z < params.Nz; ++z) {
-        for (int y=0; y < params.Ny; ++y) {
-          for (int x=0; x < params.Nx; ++x) {
-            Qhost(face, z+params.kbeg, y+params.jbeg, x+params.ibeg, var_id) = table[lid++];
+      for (int z=0; z < device_params.Nz; ++z) {
+        for (int y=0; y < device_params.Ny; ++y) {
+          for (int x=0; x < device_params.Nx; ++x) {
+            Qhost(face, z+device_params.kbeg, y+device_params.jbeg, x+device_params.ibeg, var_id) = table[lid++];
           }
         }
       }

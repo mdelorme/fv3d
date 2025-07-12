@@ -3,7 +3,7 @@
 namespace fv3d {
 
 KOKKOS_INLINE_FUNCTION
-void hll(State &qL, State &qR, State& flux, real_t &pout, const Params &params) {
+void hll(State &qL, State &qR, State& flux, real_t &pout, const DeviceParams &params) {
   const real_t aL = speedOfSound(qL, params);
   const real_t aR = speedOfSound(qR, params);
 
@@ -36,7 +36,7 @@ void hll(State &qL, State &qR, State& flux, real_t &pout, const Params &params) 
 }
 
 KOKKOS_INLINE_FUNCTION
-void hllc(State &qL, State &qR, State &flux, real_t &pout, const Params &params) {
+void hllc(State &qL, State &qR, State &flux, real_t &pout, const DeviceParams &params) {
   const real_t rL = qL[IR];
   const real_t uL = qL[IU];
   const real_t vL = qL[IV];

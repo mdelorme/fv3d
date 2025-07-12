@@ -13,7 +13,7 @@ namespace fv3d {
 
 namespace {
   KOKKOS_INLINE_FUNCTION
-  State reconstruct(Array Q, Array slopes, IFace face, int i, int j, int k, real_t sign, IDir dir, const Params &params) {
+  State reconstruct(Array Q, Array slopes, IFace face, int i, int j, int k, real_t sign, IDir dir, const DeviceParams &params) {
     State q     = getStateFromArray(Q, face, i, j, k);
     State slope = getStateFromArray(slopes, face, i, j, k);
     
@@ -36,7 +36,7 @@ namespace {
 
 class UpdateFunctor {
 public:
-  Params params;
+  Params full_params;
   BoundaryManager bc_manager;
   ThermalConductionFunctor tc_functor;
   ViscosityFunctor visc_functor;
@@ -44,13 +44,14 @@ public:
 
   Array slopesX, slopesY, slopesZ;
 
-  UpdateFunctor(const Params &params)
-    : params(params), bc_manager(params),
-      tc_functor(params), visc_functor(params), heat_functor(params) {
+  UpdateFunctor(const Params &full_params)
+    : full_params(full_params), bc_manager(full_params),
+      tc_functor(full_params), visc_functor(full_params), heat_functor(full_params) {
       
-      slopesX = Array("SlopesX", Ngrids, params.Ntz, params.Nty, params.Ntx, Nfields);
-      slopesY = Array("SlopesY", Ngrids, params.Ntz, params.Nty, params.Ntx, Nfields);
-      slopesZ = Array("SlopesZ", Ngrids, params.Ntz, params.Nty, params.Ntx, Nfields);
+      auto &device_params = full_params.device_params;
+      slopesX = Array("SlopesX", Ngrids, device_params.Ntz, device_params.Nty, device_params.Ntx, Nfields);
+      slopesY = Array("SlopesY", Ngrids, device_params.Ntz, device_params.Nty, device_params.Ntx, Nfields);
+      slopesZ = Array("SlopesZ", Ngrids, device_params.Ntz, device_params.Nty, device_params.Ntx, Nfields);
     };
   ~UpdateFunctor() = default;
 
@@ -58,11 +59,11 @@ public:
     auto slopesX = this->slopesX;
     auto slopesY = this->slopesY;
     auto slopesZ = this->slopesZ;
-    auto params  = this->params;
+    auto &params  = full_params.device_params;
 
     Kokkos::parallel_for(
       "Slopes",
-      params.range_slopes,
+      full_params.range_slopes,
       KOKKOS_LAMBDA(const IFace face, const int i, const int j, const int k) {
         for (int ivar=0; ivar < Nfields; ++ivar) {
           real_t dL = Q(face, k, j, i, ivar)   - Q(face, k, j, i-1, ivar);
@@ -90,7 +91,7 @@ public:
   }
 
   void computeFluxesAndUpdate(Array Q, Array Unew, real_t dt) const {
-    auto params = this->params;
+    auto &params = full_params.device_params;
     auto slopesX = this->slopesX;
     auto slopesY = this->slopesY;
     auto slopesZ = this->slopesZ;
@@ -98,7 +99,7 @@ public:
 
     Kokkos::parallel_for(
       "Update", 
-      params.range_dom,
+      full_params.range_dom,
       KOKKOS_LAMBDA(const IFace face, const int i, const int j, const int k) {
         // Lambda to update the cell along a direction
         auto updateAlongDir = [&](int i, int j, int k, IDir dir) {
@@ -167,6 +168,8 @@ public:
     // First filling up boundaries for ghosts terms
     bc_manager.fillBoundaries(Q);
 
+    auto &params = full_params.device_params;
+
     // Hypperbolic udpate
     if (params.reconstruction == PLM)
       computeSlopes(Q);
@@ -182,9 +185,10 @@ public:
   }
 
   void update(Array Q, Array Unew, real_t dt) {
-    if (params.time_stepping == TS_EULER)
+    if (full_params.time_stepping == TS_EULER)
       euler_step(Q, Unew, dt);
-    else if (params.time_stepping == TS_RK2) {
+    else if (full_params.time_stepping == TS_RK2) {
+      auto &params = full_params.device_params;
       Array U0    = Array("U0",    Ngrids, params.Ntz, params.Nty, params.Ntx, Nfields);
       Array Ustar = Array("Ustar", Ngrids, params.Ntz, params.Nty, params.Ntx, Nfields);
       
@@ -195,13 +199,13 @@ public:
       
       // Step 2
       Kokkos::deep_copy(Unew, Ustar);
-      consToPrim(Ustar, Q, params);
+      consToPrim(Ustar, Q, full_params);
       euler_step(Q, Unew, dt);
 
       // SSP-RK2
       Kokkos::parallel_for(
         "RK2 Correct", 
-        params.range_dom,
+        full_params.range_dom,
         KOKKOS_LAMBDA(const IFace face, const int i, const int j, const int k) {
           for (int ivar=0; ivar < Nfields; ++ivar)
             Unew(face, k, j, i, ivar) = 0.5 * (U0(face, k, j, i, ivar) + Unew(face, k, j, i, ivar));
