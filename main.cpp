@@ -25,7 +25,7 @@ int main(int argc, char **argv) {
     auto params = readInifile(argv[1]);
     std::ofstream out_ini("last.ini");
     params.reader.outputValues(out_ini);
-    auto device_params = params.device_params;
+    auto &device_params = params.device_params;
 
     // Allocating main views
     Array U    = Array("U", device_params.Ntz, device_params.Nty, device_params.Ntx, Nfields);
@@ -35,6 +35,7 @@ int main(int argc, char **argv) {
     // Misc vars for iteration
     real_t t = 0.0;
     int ite = 0;
+    real_t next_save = 0.0;
     
     // Initializing primitive variables
     InitFunctor init(params);
@@ -42,18 +43,24 @@ int main(int argc, char **argv) {
     ComputeDtFunctor computeDt(params);
     IOManager ioManager(params);
 
-    init.init(Q);
+    if (params.restart_file != "") {
+      auto restart_info = ioManager.loadSnapshot(Q);
+      t = restart_info.time;
+      ite = restart_info.iteration;
+      std::cout << "Restart at iteration " << ite << " and time " << t << std::endl;
+      next_save = t + params.save_freq;
+      ite++;
+    }
+    else
+      init.init(Q);
     primToCons(Q, U, params);
 
     real_t dt;
-    t = 0.0;
-    real_t next_save = 0.0;
     int next_log = 0;
 
     while (t + device_params.epsilon < params.tend) {
       bool save_needed = (t + device_params.epsilon > next_save);
 
-      consToPrim(U, Q, params);
       dt = computeDt.computeDt(Q, (ite == 0 ? params.save_freq : next_save-t), t, next_log == 0);
       if (next_log == 0)
         next_log = params.log_frequency;
@@ -66,9 +73,9 @@ int main(int argc, char **argv) {
         next_save += params.save_freq;
       }
 
-      update.update(Q, Unew, dt);
-
-      Kokkos::deep_copy(U, Unew);
+      update.update(Q, U, dt);
+      consToPrim(U, Q, params);
+      checkNegatives(Q, params);
 
       t += dt;
     }

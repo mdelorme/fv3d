@@ -87,11 +87,17 @@ public:
   ~IOManager() = default;
 
   void saveSolution(const Array &Q, int iteration, real_t t, real_t dt) {
+    if (params.multiple_outputs)
+      saveSolutionMultiple(Q, iteration, t, dt);
+    else
+      saveSolutionUnique(Q, iteration, t, dt);
+  }
+
+  void saveSolutionMultiple(const Array &Q, int iteration, real_t t, real_t dt)
+  {
     std::ostringstream oss;
     
-    std::setw(4);
-    std::setfill('0');
-    oss << "ite_" << iteration;
+    oss << params.filename_out << "_" << std::setw(4) << std::setfill('0') << iteration;
     std::string iteration_path = oss.str();
     std::string h5_filename  = oss.str() + ".h5";
     std::string xmf_filename = oss.str() + ".xmf";
@@ -295,8 +301,6 @@ public:
 
     std::cout << "Loading restart data from hdf5" << std::endl;
     
-    throw std::runtime_error("Restart on shell grid is not implemented.");
-
     auto load_and_copy = [&](std::string var_name, IVar var_id) {
       auto table = load<Table>(file, var_name);
       // Parallel for here ?
@@ -317,11 +321,16 @@ public:
 
     Kokkos::deep_copy(Q, Qhost);
 
+    BoundaryManager bc(params);
+    bc.fillBoundaries(Q);
+
+    HighFive::Attribute attr_time = file.getAttribute("time");
+    real_t time; attr_time.read(time);
+    HighFive::Attribute attr_ite = file.getAttribute("iteration");
+    int iteration; attr_ite.read(iteration);
+
     std::cout << "Restart finished !" << std::endl;
-
-    real_t time = loadAttribute<real_t>(file, "/", "time");
-    int iteration = loadAttribute<int>(file, "/", "iteration");
-
+    
     return {time, iteration};
   }
 };

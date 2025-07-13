@@ -6,28 +6,6 @@
 #include "INIReader.h"
 #include <Kokkos_Core.hpp>
 
-// Add functions HasSection and HasValue to INIReader, remove this when jtilly/inih.git will be updated
-struct IniReader : INIReader {
-  using INIReader::INIReader, INIReader::GetBoolean, INIReader::GetInteger, INIReader::GetFloat, INIReader::Get;
-
-  bool HasSection(const std::string& section) const
-  {
-      const std::string key = MakeKey(section, "");
-      std::map<std::string, std::string>::const_iterator pos = _values.lower_bound(key);
-      if (pos == _values.end())
-          return false;
-      // Does the key at the lower_bound pos start with "section"?
-      return pos->first.compare(0, key.length(), key) == 0;
-  }
-
-  bool HasValue(const std::string& section, const std::string& name) const
-  {
-      std::string key = MakeKey(section, name);
-      return _values.count(key);
-  }
-};
-
-
 namespace fv3d {
 
 using real_t = double;
@@ -36,129 +14,6 @@ using Pos   = Kokkos::Array<real_t, 3>;
 using State = Kokkos::Array<real_t, Nfields>;
 using Array = Kokkos::View<real_t****>;
 using ParallelRange = Kokkos::MDRangePolicy<Kokkos::Rank<3>>;
-
-struct Reader {
-  Reader() = default;
-  Reader(const std::string &filename) 
-  : reader(filename) {};
-  ~Reader() = default;
-
-  struct value_container {
-    std::string value;
-    bool from_file = false;
-    bool used = false;
-    bool is_default_value = true;
-  };
-  std::map<std::string, std::map<std::string, value_container>> _values;
-  IniReader reader;
-
-  template<typename T>
-  void registerValue(std::string section, std::string name, const T& value, bool is_default_value) {
-    auto isAlreadyPresent = [&](const std::string& section, const std::string& name) {
-      return (this->_values.count(section) != 0) && (this->_values.at(section).count(name) != 0);
-    };
-    auto isPresent = [&](const std::string& section, const std::string& name) {
-      return (this->reader.HasSection(section) && this->reader.HasValue(section, name));
-    };
-
-    bool is_already_present_in_file = isAlreadyPresent(section, name);
-    if (is_already_present_in_file) {
-      throw std::runtime_error(std::string("parameter already set : ") + name);
-    }
-    bool is_present_in_file = isPresent(section, name);
-    if (is_present_in_file) {
-      this->_values[section][name].used = true;
-      this->_values[section][name].from_file = true;
-      this->_values[section][name].is_default_value = is_default_value;
-    }
-
-    if constexpr (std::is_same_v<T, std::string>) {
-      this->_values[section][name].value = value;
-    }
-    else if constexpr (std::is_same_v<T, bool>) {
-      this->_values[section][name].value = (value) ? "true" : "false";
-    }
-    else {
-      this->_values[section][name].value = std::to_string(value);
-    }
-  }
-  bool GetBoolean(std::string section, std::string name, bool default_value){
-    bool res = this->reader.GetBoolean(section, name, default_value); 
-    registerValue(section, name, res, res == default_value);
-    return res;
-  }
-  
-  int GetInteger(std::string section, std::string name, int default_value){
-    int res = this->reader.GetInteger(section, name, default_value);
-    registerValue(section, name, res, res == default_value);
-    return res;
-  }
-  
-  real_t GetFloat(std::string section, std::string name, real_t default_value){
-    real_t res = this->reader.GetFloat(section, name, default_value);
-    registerValue(section, name, res, res == default_value);
-    return res;
-  }
-  std::string Get(std::string section, std::string name, std::string default_value){
-    std::string res = this->reader.Get(section, name, default_value);
-    registerValue(section, name, res, res == default_value);
-    return res;
-  }
-  auto GetMapValue(const auto& map, const std::string& section, const std::string& name, const std::string& default_value){
-    std::string tmp;
-    tmp = this->Get(section, name, default_value);
-
-    if (map.count(tmp) == 0) {
-      tmp = "\nallowed values: ";
-      for (auto elem : map) tmp += elem.first + ", ";
-      throw std::runtime_error(std::string("bad parameter for ") + name + ": " + tmp);
-    }
-    return map.at(tmp);
-  };
-
-  void outputValues(std::ostream& o){
-    constexpr std::string::size_type name_width = 26;
-    constexpr std::string::size_type value_width = 20;
-    auto initial_format = o.flags();
-    std::string problem = this->_values["physics"]["problem"].value;
-    o << "; Parameters used for the problem: " << problem << std::endl;
-    o << std::left;
-    for( auto p_section : this->_values )
-    {
-      const std::string& section_name = p_section.first;
-      const std::map<std::string, value_container>& map_section = p_section.second;
-
-      bool is_default_section = true;
-      for( auto p_var : map_section ) 
-      {
-        is_default_section = p_var.second.is_default_value;
-        if (!is_default_section)
-          break;
-      }
-
-      o << "\n[" << section_name << "]";
-      if (is_default_section) {
-        o << std::right << std::setw(name_width + 2*value_width - 1 - section_name.length()) << " ; default section" << std::left << std::endl;
-        continue;
-      }
-      else {
-        o << std::endl;
-      }
-      
-      for( auto p_var : map_section )
-      {
-        const std::string& var_name = p_var.first;
-        const value_container& val = p_var.second;
-
-        o << std::setw(std::max(var_name.length(),name_width)) << var_name 
-          << " = " << std::setw(std::max(val.value.length(), value_width)) << val.value 
-          << (val.is_default_value ? " ; default " : "")
-          << std::endl;
-      }
-    }
-    o.flags(initial_format);
-  }
-};
 
 struct RestartInfo {
   real_t time;
@@ -254,6 +109,148 @@ const Pos operator/(const Pos &p, real_t f)
           p[IY] / f,
           p[IZ] / f};
 }
+
+// Add functions HasSection and HasValue to INIReader, remove this when jtilly/inih.git will be updated
+struct IniReader : INIReader {
+  using INIReader::INIReader, INIReader::GetBoolean, INIReader::GetInteger, INIReader::GetFloat, INIReader::Get;
+
+  bool HasSection(const std::string& section) const
+  {
+      const std::string key = MakeKey(section, "");
+      std::map<std::string, std::string>::const_iterator pos = _values.lower_bound(key);
+      if (pos == _values.end())
+          return false;
+      // Does the key at the lower_bound pos start with "section"?
+      return pos->first.compare(0, key.length(), key) == 0;
+  }
+
+  bool HasValue(const std::string& section, const std::string& name) const
+  {
+      std::string key = MakeKey(section, name);
+      return _values.count(key);
+  }
+};
+
+// Reader 
+struct Reader {
+  Reader() = default;
+  Reader(const std::string &filename) 
+  : reader(filename) {};
+  ~Reader() = default;
+
+  struct value_container {
+    std::string value;
+    bool from_file = false;
+    bool used = false;
+    bool is_default_value = true;
+  };
+  std::map<std::string, std::map<std::string, value_container>> _values;
+  IniReader reader;
+
+  template<typename T>
+  void registerValue(std::string section, std::string name, const T& value, bool is_default_value) {
+    auto isAlreadyPresent = [&](const std::string& section, const std::string& name) {
+      return (this->_values.count(section) != 0) && (this->_values.at(section).count(name) != 0);
+    };
+    auto isPresent = [&](const std::string& section, const std::string& name) {
+      return (this->reader.HasSection(section) && this->reader.HasValue(section, name));
+    };
+
+    bool is_already_present_in_file = isAlreadyPresent(section, name);
+    if (is_already_present_in_file) {
+      throw std::runtime_error(std::string("parameter already set : ") + name);
+    }
+    bool is_present_in_file = isPresent(section, name);
+    if (is_present_in_file) {
+      this->_values[section][name].used = true;
+      this->_values[section][name].from_file = true;
+      this->_values[section][name].is_default_value = is_default_value;
+    }
+
+    if constexpr (std::is_same_v<T, std::string>){
+      this->_values[section][name].value = value;
+    }
+    else if constexpr (std::is_same_v<T, bool>) {
+      this->_values[section][name].value = (value) ? "true" : "false";
+    }
+    else {
+      this->_values[section][name].value = std::to_string(value);
+    }
+  }
+  bool GetBoolean(std::string section, std::string name, bool default_value){
+    bool res = this->reader.GetBoolean(section, name, default_value); 
+    registerValue(section, name, res, res == default_value);
+    return res;
+  }
+  
+  int GetInteger(std::string section, std::string name, int default_value){
+    int res = this->reader.GetInteger(section, name, default_value);
+    registerValue(section, name, res, res == default_value);
+    return res;
+  }
+  
+  real_t GetFloat(std::string section, std::string name, real_t default_value){
+    real_t res = this->reader.GetFloat(section, name, default_value);
+    registerValue(section, name, res, res == default_value);
+    return res;
+  }
+  std::string Get(std::string section, std::string name, std::string default_value){
+    std::string res = this->reader.Get(section, name, default_value);
+    registerValue(section, name, res, res == default_value);
+    return res;
+  }
+  template<typename T>
+  auto GetMapValue(const std::map<std::string, T>& map, const std::string& section, const std::string& name, const std::string& default_value){
+    std::string tmp;
+    tmp = this->Get(section, name, default_value);
+
+    if (map.count(tmp) == 0) {
+      tmp = "\nallowed values: ";
+      for (auto elem : map) tmp += elem.first + ", ";
+      throw std::runtime_error(std::string("bad parameter for ") + name + ": " + tmp);
+    }
+    return map.at(tmp);
+  };
+
+  void outputValues(std::ostream& o){
+    constexpr std::string::size_type name_width = 26;
+    constexpr std::string::size_type value_width = 20;
+    auto initial_format = o.flags();
+    std::string problem = this->_values["physics"]["problem"].value;
+    o << "; Parameters used for the problem: " << problem << std::endl;
+    o << std::left;
+    
+    for( auto p_section : this->_values )
+    {
+      const std::string& section_name = p_section.first;
+      const std::map<std::string, value_container>& map_section = p_section.second;
+
+      bool is_unset_section = false;
+      for( auto p_var : map_section ) 
+      {
+        is_unset_section = p_var.second.from_file;
+        if ( is_unset_section )
+          break;
+      }
+
+      if ( ! is_unset_section )
+        continue;
+      o << "\n[" << section_name << "]" << std::endl;
+      
+      for( auto p_var : map_section )
+      {
+        const std::string& var_name = p_var.first;
+        const value_container& val = p_var.second;
+
+        o << std::setw(std::max(var_name.length(),name_width)) << var_name 
+          << " = " << std::setw(std::max(val.value.length(), value_width)) << val.value 
+          << (val.from_file ? "" : " ; default ")
+          << std::endl;
+      }
+    }
+    o.flags(initial_format);
+  }
+};
 
 // All parameters that should be copied on the device
 struct DeviceParams {
@@ -544,4 +541,36 @@ void primToCons(Array &Q, Array &U, const Params &full_params) {
                         });
 }
 
+void checkNegatives(Array &Q, const Params &full_params) {
+  uint64_t negative_density  = 0;
+  uint64_t negative_pressure = 0;
+  uint64_t nan_count = 0;
+
+  Kokkos::parallel_reduce(
+    "Check negative density/pressure", 
+    full_params.range_dom,
+    KOKKOS_LAMBDA(const int i, const int j, const int k, uint64_t& lnegative_density, uint64_t& lnegative_pressure, uint64_t& lnan_count) {
+      constexpr real_t eps = 1.0e-6;
+      if (Q(k, j, i, IR) < 0) {
+        Q(k, j, i, IR) = eps;
+        lnegative_density++;
+      }
+      if (Q(k, j, i, IP) < 0) {
+        Q(k, j, i, IP) = eps;
+        lnegative_pressure++;
+      }
+
+      for (int ivar=0; ivar < Nfields; ++ivar)
+        if (std::isnan(Q(k, j, i, ivar)))
+          lnan_count++;
+
+    }, negative_density, negative_pressure, nan_count);
+
+    if (negative_density) 
+      std::cout << "--> negative density: " << negative_density << std::endl;
+    if (negative_pressure)
+      std::cout << "--> negative pressure: " << negative_pressure << std::endl;
+    if (nan_count)
+      std::cout << "--> NaN detected." << std::endl;
+}
 }
