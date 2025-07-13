@@ -59,7 +59,6 @@ public:
     auto slopesX = this->slopesX;
     auto slopesY = this->slopesY;
     auto slopesZ = this->slopesZ;
-    auto &params  = full_params.device_params;
 
     Kokkos::parallel_for(
       "Slopes",

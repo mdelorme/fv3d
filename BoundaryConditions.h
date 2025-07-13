@@ -86,7 +86,20 @@ namespace fv3d {
    */
   KOKKOS_INLINE_FUNCTION
   State fillCubedSphere(Array Q, IFace face, int i, int j, int k, IDir dir, ISide side, const DeviceParams &params) {
-    const auto [neighbour_face, ii, jj] = getGridNeighbourIndex(face, dir, side, i, j, params);
+    const auto [ neighbour_face, ii, jj, orth_dir, invert_orth_orientation ] = getGridNeighbourIndex(face, dir, side, i, j, params);
+
+    return getStateFromArray(Q, neighbour_face, ii, jj, k);
+  }
+
+  /**
+   * @brief Cubed-Sphere boundary conditions, interpolate value from the virtual cell obtain by the prolongation of the grid
+   * 
+   */
+  KOKKOS_INLINE_FUNCTION
+  State fillCubedSphereInterpolate(Array Q, IFace face, int i, int j, int k, IDir dir, ISide side, const DeviceParams &params) {
+    const auto [ neighbour_face, ii, jj, orth_dir, invert_orth_orientation ] = getGridNeighbourIndex(face, dir, side, i, j, params);
+    
+    // not implemented
 
     return getStateFromArray(Q, neighbour_face, ii, jj, k);
   }
@@ -202,10 +215,11 @@ public:
 
                             auto fill = [&](int i, int iref, ISide side) {
                               switch (bc_x) {
-                                case BC_ABSORBING:    return fillAbsorbing(Q, face, iref, j, k); break;
-                                case BC_REFLECTING:   return fillReflecting(Q, face, i, j, k, iref, j, k, IX, params); break;
-                                case BC_CUBED_SPHERE: return fillCubedSphere(Q, face, i, j, k, IX, side, params); break;
-                                default:              return fillPeriodic(Q, face, i, j, k, IX, params); break;
+                                case BC_ABSORBING:           return fillAbsorbing(Q, face, iref, j, k); break;
+                                case BC_REFLECTING:          return fillReflecting(Q, face, i, j, k, iref, j, k, IX, params); break;
+                                case BC_CUBED_SPHERE:        return fillCubedSphere(Q, face, i, j, k, IX, side, params); break;
+                                case BC_CUBED_SPHERE_INTERP: return fillCubedSphereInterpolate(Q, face, i, j, k, IX, side, params); break;
+                                default:                     return fillPeriodic(Q, face, i, j, k, IX, params); break;
                               }
                             };
 
@@ -224,10 +238,11 @@ public:
 
                             auto fill = [&](int j, int jref, ISide side) {
                               switch (bc_y) {
-                                case BC_ABSORBING:    return fillAbsorbing(Q, face, i, jref, k); break;
-                                case BC_REFLECTING:   return fillReflecting(Q, face, i, j, k, i, jref, k, IY, params); break;
-                                case BC_CUBED_SPHERE: return fillCubedSphere(Q, face, i, j, k, IY, side, params); break;
-                                default:              return fillPeriodic(Q, face, i, j, k, IY, params); break;
+                                case BC_ABSORBING:           return fillAbsorbing(Q, face, i, jref, k); break;
+                                case BC_REFLECTING:          return fillReflecting(Q, face, i, j, k, i, jref, k, IY, params); break;
+                                case BC_CUBED_SPHERE:        return fillCubedSphere(Q, face, i, j, k, IY, side, params); break;
+                                case BC_CUBED_SPHERE_INTERP: return fillCubedSphereInterpolate(Q, face, i, j, k, IY, side, params); break;
+                                default:                     return fillPeriodic(Q, face, i, j, k, IY, params); break;
                               }
                             };
 

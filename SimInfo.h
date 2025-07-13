@@ -7,28 +7,6 @@
 #include <Kokkos_Core.hpp>
 #include <math.h>
 
-// Add functions HasSection and HasValue to INIReader, remove this when jtilly/inih.git will be updated
-struct IniReader : INIReader {
-  using INIReader::INIReader, INIReader::GetBoolean, INIReader::GetInteger, INIReader::GetFloat, INIReader::Get;
-
-  bool HasSection(const std::string& section) const
-  {
-      const std::string key = MakeKey(section, "");
-      std::map<std::string, std::string>::const_iterator pos = _values.lower_bound(key);
-      if (pos == _values.end())
-          return false;
-      // Does the key at the lower_bound pos start with "section"?
-      return pos->first.compare(0, key.length(), key) == 0;
-  }
-
-  bool HasValue(const std::string& section, const std::string& name) const
-  {
-      std::string key = MakeKey(section, name);
-      return _values.count(key);
-  }
-};
-
-
 namespace fv3d {
 
 using real_t = double;
@@ -39,129 +17,6 @@ using Pos   = Kokkos::Array<real_t, 3>;
 using State = Kokkos::Array<real_t, Nfields>;
 using Array = Kokkos::View<real_t*****>;
 using ParallelRange = Kokkos::MDRangePolicy<Kokkos::Rank<4>>;
-
-struct Reader {
-  Reader() = default;
-  Reader(const std::string &filename) 
-  : reader(filename) {};
-  ~Reader() = default;
-
-  struct value_container {
-    std::string value;
-    bool from_file = false;
-    bool used = false;
-    bool is_default_value = true;
-  };
-  std::map<std::string, std::map<std::string, value_container>> _values;
-  IniReader reader;
-
-  template<typename T>
-  void registerValue(std::string section, std::string name, const T& value, bool is_default_value) {
-    auto isAlreadyPresent = [&](const std::string& section, const std::string& name) {
-      return (this->_values.count(section) != 0) && (this->_values.at(section).count(name) != 0);
-    };
-    auto isPresent = [&](const std::string& section, const std::string& name) {
-      return (this->reader.HasSection(section) && this->reader.HasValue(section, name));
-    };
-
-    bool is_already_present_in_file = isAlreadyPresent(section, name);
-    if (is_already_present_in_file) {
-      throw std::runtime_error(std::string("parameter already set : ") + name);
-    }
-    bool is_present_in_file = isPresent(section, name);
-    if (is_present_in_file) {
-      this->_values[section][name].used = true;
-      this->_values[section][name].from_file = true;
-      this->_values[section][name].is_default_value = is_default_value;
-    }
-
-    if constexpr (std::is_same_v<T, std::string>) {
-      this->_values[section][name].value = value;
-    }
-    else if constexpr (std::is_same_v<T, bool>) {
-      this->_values[section][name].value = (value) ? "true" : "false";
-    }
-    else {
-      this->_values[section][name].value = std::to_string(value);
-    }
-  }
-  bool GetBoolean(std::string section, std::string name, bool default_value){
-    bool res = this->reader.GetBoolean(section, name, default_value); 
-    registerValue(section, name, res, res == default_value);
-    return res;
-  }
-  
-  int GetInteger(std::string section, std::string name, int default_value){
-    int res = this->reader.GetInteger(section, name, default_value);
-    registerValue(section, name, res, res == default_value);
-    return res;
-  }
-  
-  real_t GetFloat(std::string section, std::string name, real_t default_value){
-    real_t res = this->reader.GetFloat(section, name, default_value);
-    registerValue(section, name, res, res == default_value);
-    return res;
-  }
-  std::string Get(std::string section, std::string name, std::string default_value){
-    std::string res = this->reader.Get(section, name, default_value);
-    registerValue(section, name, res, res == default_value);
-    return res;
-  }
-  auto GetMapValue(const auto& map, const std::string& section, const std::string& name, const std::string& default_value){
-    std::string tmp;
-    tmp = this->Get(section, name, default_value);
-
-    if (map.count(tmp) == 0) {
-      tmp = "\nallowed values: ";
-      for (auto elem : map) tmp += elem.first + ", ";
-      throw std::runtime_error(std::string("bad parameter for ") + name + ": " + tmp);
-    }
-    return map.at(tmp);
-  };
-
-  void outputValues(std::ostream& o){
-    constexpr std::string::size_type name_width = 26;
-    constexpr std::string::size_type value_width = 20;
-    auto initial_format = o.flags();
-    std::string problem = this->_values["physics"]["problem"].value;
-    o << "; Parameters used for the problem: " << problem << std::endl;
-    o << std::left;
-    for( auto p_section : this->_values )
-    {
-      const std::string& section_name = p_section.first;
-      const std::map<std::string, value_container>& map_section = p_section.second;
-
-      bool is_default_section = true;
-      for( auto p_var : map_section ) 
-      {
-        is_default_section = p_var.second.is_default_value;
-        if (!is_default_section)
-          break;
-      }
-
-      o << "\n[" << section_name << "]";
-      if (is_default_section) {
-        o << std::right << std::setw(name_width + 2*value_width - 1 - section_name.length()) << " ; default section" << std::left << std::endl;
-        continue;
-      }
-      else {
-        o << std::endl;
-      }
-      
-      for( auto p_var : map_section )
-      {
-        const std::string& var_name = p_var.first;
-        const value_container& val = p_var.second;
-
-        o << std::setw(std::max(var_name.length(),name_width)) << var_name 
-          << " = " << std::setw(std::max(val.value.length(), value_width)) << val.value 
-          << (val.is_default_value ? " ; default " : "")
-          << std::endl;
-      }
-    }
-    o.flags(initial_format);
-  }
-};
 
 struct RestartInfo {
   real_t time;
@@ -217,7 +72,8 @@ enum BoundaryType {
   BC_PERIODIC,
   BC_C91,
   BC_TRILAYER_DAMPING,
-  BC_CUBED_SPHERE
+  BC_CUBED_SPHERE,
+  BC_CUBED_SPHERE_INTERP
 };
 
 enum TimeStepping {
@@ -286,6 +142,148 @@ const Pos operator/(const Pos &p, real_t f)
           p[IY] / f,
           p[IZ] / f};
 }
+
+// Add functions HasSection and HasValue to INIReader, remove this when jtilly/inih.git will be updated
+struct IniReader : INIReader {
+  using INIReader::INIReader, INIReader::GetBoolean, INIReader::GetInteger, INIReader::GetFloat, INIReader::Get;
+
+  bool HasSection(const std::string& section) const
+  {
+      const std::string key = MakeKey(section, "");
+      std::map<std::string, std::string>::const_iterator pos = _values.lower_bound(key);
+      if (pos == _values.end())
+          return false;
+      // Does the key at the lower_bound pos start with "section"?
+      return pos->first.compare(0, key.length(), key) == 0;
+  }
+
+  bool HasValue(const std::string& section, const std::string& name) const
+  {
+      std::string key = MakeKey(section, name);
+      return _values.count(key);
+  }
+};
+
+// Reader 
+struct Reader {
+  Reader() = default;
+  Reader(const std::string &filename) 
+  : reader(filename) {};
+  ~Reader() = default;
+
+  struct value_container {
+    std::string value;
+    bool from_file = false;
+    bool used = false;
+    bool is_default_value = true;
+  };
+  std::map<std::string, std::map<std::string, value_container>> _values;
+  IniReader reader;
+
+  template<typename T>
+  void registerValue(std::string section, std::string name, const T& value, bool is_default_value) {
+    auto isAlreadyPresent = [&](const std::string& section, const std::string& name) {
+      return (this->_values.count(section) != 0) && (this->_values.at(section).count(name) != 0);
+    };
+    auto isPresent = [&](const std::string& section, const std::string& name) {
+      return (this->reader.HasSection(section) && this->reader.HasValue(section, name));
+    };
+
+    bool is_already_present_in_file = isAlreadyPresent(section, name);
+    if (is_already_present_in_file) {
+      throw std::runtime_error(std::string("parameter already set : ") + name);
+    }
+    bool is_present_in_file = isPresent(section, name);
+    if (is_present_in_file) {
+      this->_values[section][name].used = true;
+      this->_values[section][name].from_file = true;
+      this->_values[section][name].is_default_value = is_default_value;
+    }
+
+    if constexpr (std::is_same_v<T, std::string>){
+      this->_values[section][name].value = value;
+    }
+    else if constexpr (std::is_same_v<T, bool>) {
+      this->_values[section][name].value = (value) ? "true" : "false";
+    }
+    else {
+      this->_values[section][name].value = std::to_string(value);
+    }
+  }
+  bool GetBoolean(std::string section, std::string name, bool default_value){
+    bool res = this->reader.GetBoolean(section, name, default_value); 
+    registerValue(section, name, res, res == default_value);
+    return res;
+  }
+  
+  int GetInteger(std::string section, std::string name, int default_value){
+    int res = this->reader.GetInteger(section, name, default_value);
+    registerValue(section, name, res, res == default_value);
+    return res;
+  }
+  
+  real_t GetFloat(std::string section, std::string name, real_t default_value){
+    real_t res = this->reader.GetFloat(section, name, default_value);
+    registerValue(section, name, res, res == default_value);
+    return res;
+  }
+  std::string Get(std::string section, std::string name, std::string default_value){
+    std::string res = this->reader.Get(section, name, default_value);
+    registerValue(section, name, res, res == default_value);
+    return res;
+  }
+  template<typename T>
+  auto GetMapValue(const std::map<std::string, T>& map, const std::string& section, const std::string& name, const std::string& default_value){
+    std::string tmp;
+    tmp = this->Get(section, name, default_value);
+
+    if (map.count(tmp) == 0) {
+      tmp = "\nallowed values: ";
+      for (auto elem : map) tmp += elem.first + ", ";
+      throw std::runtime_error(std::string("bad parameter for ") + name + ": " + tmp);
+    }
+    return map.at(tmp);
+  };
+
+  void outputValues(std::ostream& o){
+    constexpr std::string::size_type name_width = 26;
+    constexpr std::string::size_type value_width = 20;
+    auto initial_format = o.flags();
+    std::string problem = this->_values["physics"]["problem"].value;
+    o << "; Parameters used for the problem: " << problem << std::endl;
+    o << std::left;
+    
+    for( auto p_section : this->_values )
+    {
+      const std::string& section_name = p_section.first;
+      const std::map<std::string, value_container>& map_section = p_section.second;
+
+      bool is_unset_section = false;
+      for( auto p_var : map_section ) 
+      {
+        is_unset_section = p_var.second.from_file;
+        if ( is_unset_section )
+          break;
+      }
+
+      if ( ! is_unset_section )
+        continue;
+      o << "\n[" << section_name << "]" << std::endl;
+      
+      for( auto p_var : map_section )
+      {
+        const std::string& var_name = p_var.first;
+        const value_container& val = p_var.second;
+
+        o << std::setw(std::max(var_name.length(),name_width)) << var_name 
+          << " = " << std::setw(std::max(val.value.length(), value_width)) << val.value 
+          << (val.from_file ? "" : " ; default ")
+          << std::endl;
+      }
+    }
+    o.flags(initial_format);
+  }
+};
 
 // All parameters that should be copied on the device
 struct DeviceParams {
@@ -542,6 +540,8 @@ Pos getPos(const DeviceParams& params, int i, int j, int k) {
 struct GridNeighbourIndex {
   IFace neighbour_face;
   int i, j;
+  IDir orth_dir;
+  bool invert_orth_orientation;
 };
 
 KOKKOS_INLINE_FUNCTION
@@ -552,15 +552,14 @@ GridNeighbourIndex getGridNeighbourIndex(IFace face, IDir dir, ISide side, int i
   const int beg = params.ibeg; // ibeg = jbeg
   const int end = params.iend; // iend = jend
   const int Ng  = params.Ng;
-  const int main_dir = (dir == IX) ? i : j;
-  const int orth_dir = (dir == IX) ? j : i;
-  const int ghost_id = (side == ILEFT) ? beg - 1 - main_dir : main_dir - end;
+  const int main_dir = ( dir == IX ) ? i : j;
+  const int orth_dir = ( dir == IX ) ? j : i;
+  const int ghost_id = ( side == ILEFT ) ? beg - 1 - main_dir : main_dir - end;
 
-  if (dir == IZ)
-    throw std::runtime_error("Grids do not have neighbours on the Z direction.");
+  KOKKOS_ASSERT(dir != IZ && "Grids do not have neighbours on the Z direction.");
 
   constexpr IFace neighbour_connectivity[][2][2] = {
-                 /* IX */    /* IY */
+    /*              IX          IY       */
     /* IXM */ { {IYP, IYM}, {IZM, IZP} },
     /* IXP */ { {IYP, IYM}, {IZP, IZM} },
     /* IYM */ { {IXP, IXM}, {IZP, IZM} },
@@ -571,8 +570,8 @@ GridNeighbourIndex getGridNeighbourIndex(IFace face, IDir dir, ISide side, int i
   info.neighbour_face = neighbour_connectivity[face][dir][side];
   
   constexpr uint8_t boundary_neighbour_side[6][6] = {
-                    /* neighbour */
-    /* face *//*  IX      IY      IZ*/
+    /*                 neighbour        */
+    /* face     IXM IXP IYM IYP IZM IZP */
     /* IXM  */ {__, __, ip, ip, ip, ip},
     /* IXP  */ {__, __, im, im, im, im},
     /* IYM  */ {ip, ip, __, __, jm, jp},
@@ -581,8 +580,8 @@ GridNeighbourIndex getGridNeighbourIndex(IFace face, IDir dir, ISide side, int i
     /* IZP  */ {jp, jm, jm, jp, __, __}
   };
   constexpr uint8_t invert_orth_orientation[6][6] = {
-                    /* neighbour */
-    /* face *//*  IX      IY      IZ*/
+    /*                 neighbour        */
+    /* face     IXM IXP IYM IYP IZM IZP */
     /* IXM  */ {__, __,  1,  0,  1,  0},
     /* IXP  */ {__, __,  0,  1,  1,  0},
     /* IYM  */ { 1,  0, __, __,  0,  0},
@@ -593,12 +592,13 @@ GridNeighbourIndex getGridNeighbourIndex(IFace face, IDir dir, ISide side, int i
   const uint8_t boundary_side = boundary_neighbour_side[face][info.neighbour_face];
   const uint8_t invert_orth   = invert_orth_orientation[face][info.neighbour_face];
 
-  if (boundary_side == __)
-    throw std::runtime_error("Selected faces are not neighbour to each other.");
+  KOKKOS_ASSERT(boundary_side != __ && "Selected faces are not neighbour to each other.");
 
-  info.i = (boundary_side & 1) ? end - 1 - ghost_id : beg + ghost_id;
+  info.i = ( boundary_side & 1 ) ? end - 1 - ghost_id : beg + ghost_id;
   info.j = invert_orth ? end - 1 + Ng - orth_dir : orth_dir;
-  if (boundary_side > 1) Kokkos::kokkos_swap(info.i, info.j);
+  if ( boundary_side > 1 ) Kokkos::kokkos_swap(info.i, info.j);
+  info.orth_dir = ( boundary_side > ip ) ? IX : IY;
+  info.invert_orth_orientation = static_cast<bool>(invert_orth);
 
   return info;
 }
