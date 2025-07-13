@@ -3,6 +3,7 @@
 #include <highfive/H5Easy.hpp>
 #include <ostream>
 #include <iomanip>
+#include <filesystem>
 
 // https://visit-sphinx-github-user-manual.readthedocs.io/en/3.4rc/data_into_visit/XdmfFormat.html
 
@@ -79,20 +80,21 @@ class IOManager {
 public:
   Params &params;
   DeviceParams &device_params;
+  bool force_file_truncation = false;
 
   IOManager(Params &params)
     : params(params), device_params(params.device_params) {};
 
   ~IOManager() = default;
 
-  void saveSolution(const Array &Q, int iteration, real_t t, real_t dt) {
+  void saveSolution(const Array &Q, int iteration, real_t t) {
     if (params.multiple_outputs)
-      saveSolutionMultiple(Q, iteration, t, dt);
+      saveSolutionMultiple(Q, iteration, t);
     else
-      saveSolutionUnique(Q, iteration, t, dt);
+      saveSolutionUnique(Q, iteration, t);
   }
 
-  void saveSolutionMultiple(const Array &Q, int iteration, real_t t, real_t dt)
+  void saveSolutionMultiple(const Array &Q, int iteration, real_t t)
   {
     std::ostringstream oss;
     
@@ -117,7 +119,6 @@ public:
     file.createAttribute("kbeg", device_params.kbeg);
     file.createAttribute("kend", device_params.kend);
     file.createAttribute("problem", params.problem);
-    file.createAttribute("iteration", iteration);
 
     std::vector<real_t> x, y, z;
     // -- vertex pos
@@ -165,6 +166,7 @@ public:
     file.createDataSet("w", tw);
     file.createDataSet("prs", tprs);
     file.createAttribute("time", t);
+    file.createAttribute("iteration", iteration);
 
     std::string group = "";
 
@@ -178,18 +180,21 @@ public:
     fclose(xdmf_fd);
   }
 
-  void saveSolutionUnique(const Array &Q, int iteration, real_t t, real_t dt) {
+  void saveSolutionUnique(const Array &Q, int iteration, real_t t) {
     std::ostringstream oss;
     
     oss << ite_prefix << std::setw(ite_nzeros) << std::setfill('0') << iteration;
     std::string iteration_str = oss.str();
+
+    force_file_truncation = (force_file_truncation || iteration == 0);
       
-    auto flag_h5 = (iteration == 0 ? File::Truncate : File::ReadWrite);
-    auto flag_xdmf = (iteration == 0 ? "w+" : "r+");
+    auto flag_h5 = (force_file_truncation ? File::Truncate : File::ReadWrite);
+    auto flag_xdmf = (force_file_truncation ? "w+" : "r+");
     File file(params.filename_out + ".h5", flag_h5);
     FILE* xdmf_fd = fopen((params.filename_out + ".xdmf").c_str(), flag_xdmf);
 
-    if (iteration == 0) {
+    if (force_file_truncation) {
+      force_file_truncation = false;
       file.createAttribute("Ntx", device_params.Ntx);
       file.createAttribute("Nty", device_params.Nty);
       file.createAttribute("Ntz", device_params.Ntz);
@@ -224,18 +229,14 @@ public:
       fprintf(xdmf_fd, "%s", str_xdmf_footer);
     }
     
-    using Table = std::vector<std::vector<std::vector<real_t>>>;
+    using Table = std::vector<real_t>;
 
     auto Qhost = Kokkos::create_mirror(Q);
     Kokkos::deep_copy(Qhost, Q);
 
     Table trho, tu, tv, tw, tprs;
     for (int k=device_params.kbeg; k<device_params.kend; ++k) {
-      std::vector<std::vector<real_t>> rcrho, rcu, rcv, rcw, rcprs;
-
       for (int j=device_params.jbeg; j<device_params.jend; ++j) {
-        std::vector<real_t> rrho, ru, rv, rw, rprs;
-
         for (int i=device_params.ibeg; i<device_params.iend; ++i) {
           real_t rho = Qhost(k, j, i, IR);
           real_t u   = Qhost(k, j, i, IU);
@@ -243,25 +244,13 @@ public:
           real_t w   = Qhost(k, j, i, IW);
           real_t p   = Qhost(k, j, i, IP);
 
-          rrho.push_back(rho);
-          ru.push_back(u);
-          rv.push_back(v);
-          rw.push_back(w);
-          rprs.push_back(p);
+          trho.push_back(rho);
+          tu.push_back(u);
+          tv.push_back(v);
+          tw.push_back(w);
+          tprs.push_back(p);
         }
-
-        rcrho.push_back(rrho);
-        rcu.push_back(ru);
-        rcv.push_back(rv);
-        rcw.push_back(rw);
-        rcprs.push_back(rprs);
       }
-
-      trho.push_back(rcrho);
-      tu.push_back(rcu);
-      tv.push_back(rcv);
-      tw.push_back(rcw);
-      tprs.push_back(rcprs);
     }
 
     auto ite_group = file.createGroup(iteration_str);
@@ -271,6 +260,7 @@ public:
     ite_group.createDataSet("w", tw);
     ite_group.createDataSet("prs", tprs);
     ite_group.createAttribute("time", t);
+    ite_group.createAttribute("iteration", iteration);
 
     const std::string group = iteration_str + "/";
 
@@ -285,15 +275,53 @@ public:
   }
 
   RestartInfo loadSnapshot(Array &Q) {
-    std::string restart_file = params.restart_file;
-    std::string ite_group = "";
-    if (params.multiple_outputs) {
+    // example of unique_output restart_file: 'run.h5:/ite_0005'
+    // or just 'run.h5' for the last iteration
 
+    std::string restart_file = params.restart_file;
+    std::string group = "";
+
+    const auto delim_multi = restart_file.find(".h5:/");
+    if (delim_multi != std::string::npos) {
+      group = restart_file.substr(delim_multi + 5);
+      restart_file = restart_file.substr(0, delim_multi + 3);
     }
 
+    if ( !params.multiple_outputs && std::filesystem::equivalent(restart_file, params.filename_out + ".h5") ) {
+      if (delim_multi != std::string::npos) {
+        std::cerr << "Invalid restart file : if your restart file and output file are "
+                     "the same, you can only start from the last iteration." << std::endl << std::endl;
+        throw std::runtime_error("ERROR : Invalid restart_file.");
+      }
+    }
+    else {
+      this->force_file_truncation = true;
+    }
+    
     File file(restart_file, File::ReadOnly);
+    real_t time;
+    int iteration;
 
-    auto Nt = getShape(file, "rho")[0];
+    if (file.hasAttribute("time")) {
+      HighFive::Attribute attr_time = file.getAttribute("time");
+      attr_time.read(time);
+      HighFive::Attribute attr_ite = file.getAttribute("iteration");
+      attr_ite.read(iteration);
+    }
+    else {
+      if (group == "") {
+        const size_t last_ite_index = file.getNumberObjects() - 4;
+        group = file.getObjectName(last_ite_index);
+      }
+      HighFive::Group h5_group = file.getGroup(group);
+      HighFive::Attribute attr_time = h5_group.getAttribute("time");
+      attr_time.read(time);
+      HighFive::Attribute attr_ite = h5_group.getAttribute("iteration");
+      attr_ite.read(iteration);
+      group = group + "/";
+    }
+
+    auto Nt = getShape(file, group + "rho")[0];
 
     if (Nt != device_params.Nx*device_params.Ny*device_params.Nz) {
       std::cerr << "Attempting to restart with a different resolution ! Ncells (restart) = " << Nt << "; Run resolution = " 
@@ -307,7 +335,7 @@ public:
     std::cout << "Loading restart data from hdf5" << std::endl;
     
     auto load_and_copy = [&](std::string var_name, IVar var_id) {
-      auto table = load<Table>(file, var_name);
+      auto table = load<Table>(file, group + var_name);
       // Parallel for here ?
       int lid = 0;
       for (int z=0; z < device_params.Nz; ++z) {
@@ -329,13 +357,19 @@ public:
     BoundaryManager bc(params);
     bc.fillBoundaries(Q);
 
-    HighFive::Attribute attr_time = file.getAttribute("time");
-    real_t time; attr_time.read(time);
-    HighFive::Attribute attr_ite = file.getAttribute("iteration");
-    int iteration; attr_ite.read(iteration);
+    if (time + params.device_params.epsilon > params.tend) {
+      std::cerr << "Restart time is greater than end time : " << std::endl
+                << "  time: " << time << "\ttend: " << params.tend << std::endl << std::endl; 
+      throw std::runtime_error("ERROR : restart time is greater than the end time.");
+    }
 
     std::cout << "Restart finished !" << std::endl;
-    
+
+    if (force_file_truncation) {
+      file.~File(); // free the h5 before saving
+      saveSolution(Q, iteration, time);
+    }
+
     return {time, iteration};
   }
 };
