@@ -24,11 +24,11 @@ namespace {
 <!ENTITY fdim "%d %d %d">
 <!ENTITY gdim "%d %d %d">
 <!ENTITY GridEntity '
-<Topology TopologyType="3DSMesh" Dimensions="&gdim;"/>
-<Geometry GeometryType="X_Y_Z">
-  <DataItem Dimensions="&gdim;" NumberType="Float" Precision="8" Format="HDF">&file;/x</DataItem>
-  <DataItem Dimensions="&gdim;" NumberType="Float" Precision="8" Format="HDF">&file;/y</DataItem>
-  <DataItem Dimensions="&gdim;" NumberType="Float" Precision="8" Format="HDF">&file;/z</DataItem>
+<Topology TopologyType="Hexahedron" NodesPerElement="8" NumberOfElements="&fdim;">
+  <DataItem Dimensions="&fdim; 8" NumberType="UInt" Precision="4" Format="HDF">&file;/connectivity</DataItem>
+</Topology>
+<Geometry GeometryType="XYZ">
+  <DataItem Dimensions="&gdim; 3" NumberType="Float" Precision="8" Format="HDF">&file;/coordinate</DataItem>
 </Geometry>'>
 ]>
 <Xdmf Version="3.0">
@@ -36,7 +36,7 @@ namespace {
   <Grid Name="TimeSeries" GridType="Collection" CollectionType="Temporal">
     )xml";
   #define format_xdmf_header(params, filename)        \
-          (filename + ".h5").c_str(),                 \
+          (filename).c_str(),                         \
           params.Nz,     params.Ny,     params.Nx,    \
           params.Nz + 1, params.Ny + 1, params.Nx + 1
   char str_xdmf_footer[] =
@@ -51,25 +51,21 @@ namespace {
       <Time Value="%lf" />
       &GridEntity;)xml";
   #define format_xdmf_ite_header(name, time) \
-          name.c_str(), time
+          (name).c_str(), time
   char str_xdmf_scalar_field[] =
   R"xml(
       <Attribute Name="%s" AttributeType="Scalar" Center="Cell">
         <DataItem Dimensions="&fdim;" NumberType="Float" Precision="8" Format="HDF">&file;/%s%s</DataItem>
       </Attribute>)xml";
   #define format_xdmf_scalar_field(group, field) \
-          field, group.c_str(), field
+          field, (group).c_str(), field
   char str_xdmf_vector_field[] =
   R"xml(
       <Attribute Name="%s" AttributeType="Vector" Center="Cell">
-        <DataItem Dimensions="&fdim; 3" ItemType="Function" Function="JOIN($0, $1, $2)">
-          <DataItem Dimensions="&fdim;" NumberType="Float" Precision="8" Format="HDF">&file;/%s%s</DataItem>
-          <DataItem Dimensions="&fdim;" NumberType="Float" Precision="8" Format="HDF">&file;/%s%s</DataItem>
-          <DataItem Dimensions="&fdim;" NumberType="Float" Precision="8" Format="HDF">&file;/%s%s</DataItem>
-        </DataItem>
+        <DataItem Dimensions="&fdim; 3" NumberType="Float" Precision="8" Format="HDF">&file;/%s%s</DataItem>
       </Attribute>)xml";
-  #define format_xdmf_vector_field(group, name, field_x, field_y, field_z)             \
-          name, group.c_str(), field_x, group.c_str(), field_y, group.c_str(), field_z
+  #define format_xdmf_vector_field(group, field) \
+          field, (group).c_str(), field
   char str_xdmf_ite_footer[] =
   R"xml(
     </Grid>
@@ -120,28 +116,43 @@ public:
     file.createAttribute("kend", device_params.kend);
     file.createAttribute("problem", params.problem);
 
-    std::vector<real_t> x, y, z;
+    std::vector<std::array<real_t, 3>> coordinate;
     // -- vertex pos
     for (int k=device_params.kbeg; k <= device_params.kend; ++k) {
       for (int j=device_params.jbeg; j <= device_params.jend; ++j) {
         for (int i=device_params.ibeg; i <= device_params.iend; ++i) {
-          x.push_back((i-device_params.ibeg) * device_params.dx);
-          y.push_back((j-device_params.jbeg) * device_params.dy);
-          z.push_back((k-device_params.kbeg) * device_params.dz);
+          coordinate.push_back({ (i-device_params.ibeg) * device_params.dx, 
+                                 (j-device_params.jbeg) * device_params.dy,
+                                 (k-device_params.kbeg) * device_params.dz });
         }
       }
     }
+    file.createDataSet("coordinate", coordinate);
+    
+    std::vector<std::array<uint32_t, 8>> connectivity;
+    // -- connectivity
+    for (int k=device_params.kbeg; k < device_params.kend; ++k) {
+      for (int j=device_params.jbeg; j < device_params.jend; ++j) {
+        for (int i=device_params.ibeg; i < device_params.iend; ++i) {
+          auto vertex_id = [&](int i, int j, int k) -> uint32_t { 
+            return (i-device_params.ibeg) + (j-device_params.jbeg) * (device_params.Nx + 1) 
+                 + (k-device_params.kbeg) * (device_params.Nx + 1) * (device_params.Ny + 1); 
+          };
+          connectivity.push_back({ vertex_id(i, j, k),   vertex_id(i+1, j, k),   vertex_id(i+1, j+1, k),   vertex_id(i, j+1, k),
+                                   vertex_id(i, j, k+1), vertex_id(i+1, j, k+1), vertex_id(i+1, j+1, k+1), vertex_id(i, j+1, k+1) });
+        }
+      }
+    }
+    file.createDataSet("connectivity", connectivity);
 
-    file.createDataSet("x", x);
-    file.createDataSet("y", y);
-    file.createDataSet("z", z);
-
-    using Table = std::vector<real_t>;
+    using Table     = std::vector<real_t>;
+    using Table_vec = std::vector<std::array<real_t, 3>>;
 
     auto Qhost = Kokkos::create_mirror(Q);
     Kokkos::deep_copy(Qhost, Q);
 
-    Table trho, tu, tv, tw, tprs;
+    Table trho, tprs;
+    Table_vec tvel;
     for (int k=device_params.kbeg; k<device_params.kend; ++k) {
       for (int j=device_params.jbeg; j<device_params.jend; ++j) {
         for (int i=device_params.ibeg; i<device_params.iend; ++i) {
@@ -152,28 +163,24 @@ public:
           real_t p   = Qhost(k, j, i, IP);
 
           trho.push_back(rho);
-          tu.push_back(u);
-          tv.push_back(v);
-          tw.push_back(w);
+          tvel.push_back({u, v, w});
           tprs.push_back(p);
         }
       }
     }
 
     file.createDataSet("rho", trho);
-    file.createDataSet("u", tu);
-    file.createDataSet("v", tv);
-    file.createDataSet("w", tw);
+    file.createDataSet("velocity", tvel);
     file.createDataSet("prs", tprs);
     file.createAttribute("time", t);
     file.createAttribute("iteration", iteration);
 
     std::string group = "";
 
-    fprintf(xdmf_fd, str_xdmf_header, format_xdmf_header(device_params, iteration_str));
+    fprintf(xdmf_fd, str_xdmf_header, format_xdmf_header(device_params, h5_filename));
     fprintf(xdmf_fd, str_xdmf_ite_header, format_xdmf_ite_header(iteration_str, t));
     fprintf(xdmf_fd, str_xdmf_scalar_field, format_xdmf_scalar_field(group, "rho"));
-    fprintf(xdmf_fd, str_xdmf_vector_field, format_xdmf_vector_field(group, "velocity", "u", "v", "w"));
+    fprintf(xdmf_fd, str_xdmf_vector_field, format_xdmf_vector_field(group, "velocity"));
     fprintf(xdmf_fd, str_xdmf_scalar_field, format_xdmf_scalar_field(group, "prs"));
     fprintf(xdmf_fd, "%s", str_xdmf_ite_footer);
     fprintf(xdmf_fd, "%s", str_xdmf_footer);
@@ -209,32 +216,47 @@ public:
       file.createAttribute("kend", device_params.kend);
       file.createAttribute("problem", params.problem);
 
-      std::vector<real_t> x, y, z;
+      std::vector<std::array<real_t, 3>> coordinate;
       // -- vertex pos
       for (int k=device_params.kbeg; k <= device_params.kend; ++k) {
         for (int j=device_params.jbeg; j <= device_params.jend; ++j) {
           for (int i=device_params.ibeg; i <= device_params.iend; ++i) {
-            x.push_back((i-device_params.ibeg) * device_params.dx);
-            y.push_back((j-device_params.jbeg) * device_params.dy);
-            z.push_back((k-device_params.kbeg) * device_params.dz);
+            coordinate.push_back({ (i-device_params.ibeg) * device_params.dx, 
+                                   (j-device_params.jbeg) * device_params.dy,
+                                   (k-device_params.kbeg) * device_params.dz });
           }
         }
       }
+      file.createDataSet("coordinate", coordinate);
+      
+      std::vector<std::array<uint32_t, 8>> connectivity;
+      // -- connectivity
+      for (int k=device_params.kbeg; k < device_params.kend; ++k) {
+        for (int j=device_params.jbeg; j < device_params.jend; ++j) {
+          for (int i=device_params.ibeg; i < device_params.iend; ++i) {
+            auto vertex_id = [&](int i, int j, int k) -> uint32_t { 
+              return (i-device_params.ibeg) + (j-device_params.jbeg) * (device_params.Nx + 1) 
+                   + (k-device_params.kbeg) * (device_params.Nx + 1) * (device_params.Ny + 1); 
+            };
+            connectivity.push_back({ vertex_id(i, j, k),   vertex_id(i+1, j, k),   vertex_id(i+1, j+1, k),   vertex_id(i, j+1, k),
+                                     vertex_id(i, j, k+1), vertex_id(i+1, j, k+1), vertex_id(i+1, j+1, k+1), vertex_id(i, j+1, k+1) });
+          }
+        }
+      }
+      file.createDataSet("connectivity", connectivity);
 
-      file.createDataSet("x", x);
-      file.createDataSet("y", y);
-      file.createDataSet("z", z);
-
-      fprintf(xdmf_fd, str_xdmf_header, format_xdmf_header(device_params, params.filename_out));
+      fprintf(xdmf_fd, str_xdmf_header, format_xdmf_header(device_params, params.filename_out + ".h5"));
       fprintf(xdmf_fd, "%s", str_xdmf_footer);
     }
     
-    using Table = std::vector<real_t>;
+    using Table     = std::vector<real_t>;
+    using Table_vec = std::vector<std::array<real_t, 3>>;
 
     auto Qhost = Kokkos::create_mirror(Q);
     Kokkos::deep_copy(Qhost, Q);
 
-    Table trho, tu, tv, tw, tprs;
+    Table trho, tprs;
+    Table_vec tvel;
     for (int k=device_params.kbeg; k<device_params.kend; ++k) {
       for (int j=device_params.jbeg; j<device_params.jend; ++j) {
         for (int i=device_params.ibeg; i<device_params.iend; ++i) {
@@ -245,9 +267,7 @@ public:
           real_t p   = Qhost(k, j, i, IP);
 
           trho.push_back(rho);
-          tu.push_back(u);
-          tv.push_back(v);
-          tw.push_back(w);
+          tvel.push_back({u, v, w});
           tprs.push_back(p);
         }
       }
@@ -255,9 +275,7 @@ public:
 
     auto ite_group = file.createGroup(iteration_str);
     ite_group.createDataSet("rho", trho);
-    ite_group.createDataSet("u", tu);
-    ite_group.createDataSet("v", tv);
-    ite_group.createDataSet("w", tw);
+    ite_group.createDataSet("velocity", tvel);
     ite_group.createDataSet("prs", tprs);
     ite_group.createAttribute("time", t);
     ite_group.createAttribute("iteration", iteration);
@@ -267,7 +285,7 @@ public:
     fseek(xdmf_fd, -sizeof(str_xdmf_footer), SEEK_END);
     fprintf(xdmf_fd, str_xdmf_ite_header, format_xdmf_ite_header(iteration_str, t));
     fprintf(xdmf_fd, str_xdmf_scalar_field, format_xdmf_scalar_field(group, "rho"));
-    fprintf(xdmf_fd, str_xdmf_vector_field, format_xdmf_vector_field(group, "velocity", "u", "v", "w"));
+    fprintf(xdmf_fd, str_xdmf_vector_field, format_xdmf_vector_field(group, "velocity"));
     fprintf(xdmf_fd, str_xdmf_scalar_field, format_xdmf_scalar_field(group, "prs"));
     fprintf(xdmf_fd, "%s", str_xdmf_ite_footer);
     fprintf(xdmf_fd, "%s", str_xdmf_footer);
@@ -310,7 +328,7 @@ public:
     }
     else {
       if (group == "") {
-        const size_t last_ite_index = file.getNumberObjects() - 4;
+        const size_t last_ite_index = file.getNumberObjects() - 1;
         group = file.getObjectName(last_ite_index);
       }
       HighFive::Group h5_group = file.getGroup(group);
@@ -330,27 +348,34 @@ public:
     }
 
     auto Qhost = Kokkos::create_mirror(Q);
-    using Table = std::vector<real_t>;
 
     std::cout << "Loading restart data from hdf5" << std::endl;
     
-    auto load_and_copy = [&](std::string var_name, IVar var_id) {
+    auto load_and_copy = [&]<std::size_t N>(const std::string var_name, const std::array<IVar, N>& var_id) {
+      using Elem  = std::conditional_t<N == 1, real_t, std::array<real_t, N>>;
+      using Table = std::vector<Elem>;
       auto table = load<Table>(file, group + var_name);
+      
       // Parallel for here ?
       int lid = 0;
       for (int z=0; z < device_params.Nz; ++z) {
         for (int y=0; y < device_params.Ny; ++y) {
           for (int x=0; x < device_params.Nx; ++x) {
-            Qhost(z+device_params.kbeg, y+device_params.jbeg, x+device_params.ibeg, var_id) = table[lid++];
+            Elem elem = table[lid++];
+            if constexpr (N == 1)
+              Qhost(z+device_params.kbeg, y+device_params.jbeg, x+device_params.ibeg, var_id[0]) = elem;
+            else {
+              for (int i=0; i<N; i++) {
+                Qhost(z+device_params.kbeg, y+device_params.jbeg, x+device_params.ibeg, var_id[i]) = elem[i];
+              }
+            }
           }
         }
       }
     };
-    load_and_copy("rho", IR);
-    load_and_copy("u",   IU);
-    load_and_copy("v",   IV);
-    load_and_copy("w",   IW);
-    load_and_copy("prs", IP);
+    load_and_copy("rho",      std::array{IR});
+    load_and_copy("velocity", std::array{IU, IV, IW});
+    load_and_copy("prs",      std::array{IP});
 
     Kokkos::deep_copy(Q, Qhost);
 
