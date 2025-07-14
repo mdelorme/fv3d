@@ -53,13 +53,13 @@ enum IFaceEnum : IFace {
 };
 
 std::map<IFace, std::string> facename_map{
-    {IXM, "x-"},
-    {IXP, "x+"},
-    {IYM, "y-"},
-    {IYP, "y+"},
-    {IZM, "z-"},
-    {IZP, "z+"}
-  };
+  {IXM, "xm"},
+  {IXP, "xp"},
+  {IYM, "ym"},
+  {IYP, "yp"},
+  {IZM, "zm"},
+  {IZP, "zp"}
+};
 
 enum RiemannSolver {
   HLL,
@@ -632,8 +632,6 @@ Params readInifile(std::string filename) {
   res.tend = reader.GetFloat("run", "tend", 1.0);
   res.multiple_outputs = reader.GetBoolean("run", "multiple_outputs", false);
   res.restart_file = reader.Get("run", "restart_file", "");
-  if (res.restart_file != "" && !res.multiple_outputs)
-    throw std::runtime_error("Restart one unique files is not implemented yet !");
   
   res.save_freq = reader.GetFloat("run", "save_freq", 1.0e-1);
   res.filename_out = reader.Get("run", "output_filename", "run");
